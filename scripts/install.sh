@@ -8,8 +8,8 @@ BUN_VERSION="1.3.14"
 OPENCODE_VERSION="1.18.15"
 MEAT_VERSION="v0.0.0-20260803201634-f39f41dfe7b5"
 PLANNOTATOR_REPOSITORY="${PLANNOTATOR_REPOSITORY:-https://github.com/dylanvanh/plannotator.git}"
-PLANNOTATOR_REF="${PLANNOTATOR_REF:-feat/raw-patch-review}"
-GATEWAY_PACKAGE="${GATEWAY_PACKAGE:-git+https://github.com/dylanvanh/opencode-as-openai-api.git}"
+PLANNOTATOR_REF="${PLANNOTATOR_REF:-bae103c7f5719c08a2261f0c5aadcdbae90a52cb}"
+GATEWAY_PACKAGE="${GATEWAY_PACKAGE:-git+https://github.com/dylanvanh/opencode-as-openai-api.git#720e15e103d5c9cc87b0c477491b54fd8868e01d}"
 INSTALL_PREFIX="${HOME}/.local"
 INSTALL_BIN="${INSTALL_PREFIX}/bin"
 WORK_DIRECTORY="$(mktemp -d)"
@@ -136,7 +136,9 @@ echo "Installing Meat..."
 GOBIN="$INSTALL_BIN" go install "meat.dev/cmd/meat@${MEAT_VERSION}"
 
 echo "Building the Plannotator fork..."
-git clone --depth 1 --branch "$PLANNOTATOR_REF" "$PLANNOTATOR_REPOSITORY" "${WORK_DIRECTORY}/plannotator"
+git clone --depth 1 "$PLANNOTATOR_REPOSITORY" "${WORK_DIRECTORY}/plannotator"
+git -C "${WORK_DIRECTORY}/plannotator" fetch --depth 1 origin "$PLANNOTATOR_REF"
+git -C "${WORK_DIRECTORY}/plannotator" checkout --detach FETCH_HEAD
 (
   cd "${WORK_DIRECTORY}/plannotator"
   bun install --frozen-lockfile

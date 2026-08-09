@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 $PlannotatorRepository = if ($env:PLANNOTATOR_REPOSITORY) { $env:PLANNOTATOR_REPOSITORY } else { "https://github.com/dylanvanh/plannotator.git" }
-$PlannotatorRef = if ($env:PLANNOTATOR_REF) { $env:PLANNOTATOR_REF } else { "feat/raw-patch-review" }
-$GatewayPackage = if ($env:GATEWAY_PACKAGE) { $env:GATEWAY_PACKAGE } else { "git+https://github.com/dylanvanh/opencode-as-openai-api.git" }
+$PlannotatorRef = if ($env:PLANNOTATOR_REF) { $env:PLANNOTATOR_REF } else { "bae103c7f5719c08a2261f0c5aadcdbae90a52cb" }
+$GatewayPackage = if ($env:GATEWAY_PACKAGE) { $env:GATEWAY_PACKAGE } else { "git+https://github.com/dylanvanh/opencode-as-openai-api.git#720e15e103d5c9cc87b0c477491b54fd8868e01d" }
 $OpenCodeVersion = "1.18.15"
 $MeatVersion = "v0.0.0-20260803201634-f39f41dfe7b5"
 $InstallPrefix = Join-Path $env:LOCALAPPDATA "Programs\opencode-meat-review"
@@ -70,8 +70,12 @@ Write-Host "Building the Plannotator fork..."
 New-Item -ItemType Directory -Force -Path $WorkDirectory | Out-Null
 try {
     $plannotatorDirectory = Join-Path $WorkDirectory "plannotator"
-    & git clone --depth 1 --branch $PlannotatorRef $PlannotatorRepository $plannotatorDirectory
+    & git clone --depth 1 $PlannotatorRepository $plannotatorDirectory
     if ($LASTEXITCODE -ne 0) { throw "Plannotator clone failed" }
+    & git -C $plannotatorDirectory fetch --depth 1 origin $PlannotatorRef
+    if ($LASTEXITCODE -ne 0) { throw "Plannotator ref fetch failed" }
+    & git -C $plannotatorDirectory checkout --detach FETCH_HEAD
+    if ($LASTEXITCODE -ne 0) { throw "Plannotator checkout failed" }
     Push-Location $plannotatorDirectory
     try {
         & bun install --frozen-lockfile
