@@ -7,6 +7,8 @@
 - Node.js 20 or newer
 - OpenCode 1.18.4 or newer
 - A provider and model already configured in OpenCode
+- Meat and the patched Plannotator fork for `review`
+- GitHub CLI for GitHub pull request reviews
 - `cloudflared` only if you use `--tunnel quick`
 
 ## Start
@@ -21,7 +23,39 @@ Set a stable API token before startup if another local program needs a fixed val
 OPENCODE_API_TOKEN=choose-a-long-random-value npx opencode-as-openai-api --model provider/model
 ```
 
-The command prints the local base URL, token, and values for Meat. The default base URL is `http://127.0.0.1:8787/v1`.
+The command prints the local base URL, token, and client configuration. The default base URL is `http://127.0.0.1:8787/v1`.
+
+## Meat + Plannotator review
+
+Review all current branch changes since the base branch through Meat before opening Plannotator:
+
+```sh
+opencode-as-openai-api review --model provider/model
+```
+
+Review a GitHub pull request:
+
+```sh
+opencode-as-openai-api review https://github.com/owner/repo/pull/123 --model provider/model
+```
+
+The command starts a private gateway on a free port, sends the source diff through Meat, and opens the reduced patch as a static Plannotator review. For a pull request, feedback stays local and is not posted to GitHub because Meat can remove lines required for safe GitHub comment anchors. Use `--base <ref>` if the local base branch cannot be detected.
+
+### Install everything
+
+macOS and Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dylanvanh/opencode-as-openai-api/main/scripts/install.sh | bash
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/dylanvanh/opencode-as-openai-api/main/scripts/install.ps1 | iex
+```
+
+The installer adds GitHub CLI, Node.js, Go, Bun, OpenCode, Meat, the Plannotator fork, and this package. Windows uses `winget`; macOS and Linux use their native package manager for Git and GitHub CLI. Run `gh auth login` before reviewing a GitHub pull request.
 
 ## API
 

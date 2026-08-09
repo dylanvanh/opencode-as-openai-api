@@ -8,13 +8,14 @@
   },
   "files": [
     "src",
+    "scripts",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "start": "node src/cli.js",
     "test": "node --test",
-    "check": "node --check src/cli.js && node --check src/server.js && node --check src/translate.js && npm test"
+    "check": "node --check src/cli.js && node --check src/review.js && node --check src/server.js && node --check src/translate.js && npm test"
   },
   "engines": {
     "node": ">=20"

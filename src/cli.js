@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import { createGateway } from "./server.js";
+import { runReview } from "./review.js";
 import { splitModel } from "./translate.js";
 
 const VERSION = "0.1.0";
@@ -14,22 +15,27 @@ const DENIED_PERMISSIONS = [
   "todowrite", "question", "webfetch", "websearch", "lsp", "doom_loop", "skill",
 ];
 
-function usage() {
-  return `opencode-as-openai-api ${VERSION}\n\nUsage:\n  opencode-as-openai-api --model <provider/model> [options]\n\nOptions:\n  --model <provider/model>    Model exposed by the gateway\n  --variant <id>              Fixed OpenCode model variant\n  --directory <path>          OpenCode configuration directory\n  --port <number>             Gateway port (default: 8787; 0 selects a free port)\n  --max-concurrency <number>  Concurrent requests (default: 1)\n  --tunnel quick              Start a TryCloudflare tunnel\n  --help                      Show help\n  --version                   Show version`;
+function usage(review = false) {
+  if (review) return `opencode-as-openai-api ${VERSION}\n\nUsage:\n  opencode-as-openai-api review [GitHub PR URL] --model <provider/model> [options]\n\nOptions:\n  --model <provider/model>  Model used by Meat\n  --variant <id>            Fixed OpenCode model variant\n  --directory <path>        OpenCode configuration directory\n  --base <ref>              Local base branch (auto-detected by default)\n  --help                    Show help`;
+  return `opencode-as-openai-api ${VERSION}\n\nUsage:\n  opencode-as-openai-api --model <provider/model> [options]\n  opencode-as-openai-api review [GitHub PR URL] --model <provider/model> [options]\n\nOptions:\n  --model <provider/model>    Model exposed by the gateway\n  --variant <id>              Fixed OpenCode model variant\n  --directory <path>          OpenCode configuration directory\n  --port <number>             Gateway port (default: 8787; 0 selects a free port)\n  --max-concurrency <number>  Concurrent requests (default: 1)\n  --tunnel quick              Start a TryCloudflare tunnel\n  --help                      Show help\n  --version                   Show version`;
 }
 
-export function parseArgs(argv) {
-  const options = { port: 8787, maxConcurrency: 1, tunnel: null };
+export function parseArgs(argv, review = false) {
+  const options = { port: review ? 0 : 8787, maxConcurrency: 1, tunnel: null };
+  const valueOptions = review
+    ? ["--model", "--variant", "--directory", "--base"]
+    : ["--model", "--variant", "--directory", "--port", "--max-concurrency", "--tunnel"];
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === "--help") options.help = true;
     else if (arg === "--version") options.version = true;
-    else if (["--model", "--variant", "--directory", "--port", "--max-concurrency", "--tunnel"].includes(arg)) {
+    else if (valueOptions.includes(arg)) {
       const value = argv[++index];
       if (!value) throw new Error(`${arg} requires a value`);
       if (arg === "--max-concurrency") options.maxConcurrency = Number(value);
       else options[arg.slice(2)] = arg === "--port" ? Number(value) : value;
-    } else throw new Error(`unknown option: ${arg}`);
+    } else if (review && !arg.startsWith("-") && !options.prUrl) options.prUrl = validatePrUrl(arg);
+    else throw new Error(`unknown option: ${arg}`);
   }
   if (!options.help && !options.version) {
     if (!options.model) throw new Error("--model is required");
@@ -37,9 +43,19 @@ export function parseArgs(argv) {
     if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535) throw new Error("--port must be from 0 to 65535");
     if (!Number.isInteger(options.maxConcurrency) || options.maxConcurrency < 1) throw new Error("--max-concurrency must be a positive integer");
     if (options.tunnel && options.tunnel !== "quick") throw new Error("--tunnel only supports quick");
+    if (review && options.prUrl && options.base) throw new Error("--base cannot be combined with a GitHub PR URL");
     if (options.directory) options.directory = resolve(options.directory);
   }
   return options;
+}
+
+function validatePrUrl(value) {
+  let url;
+  try { url = new URL(value); } catch { throw new Error("review target must be a GitHub PR URL"); }
+  if (url.protocol !== "https:" || url.hostname !== "github.com" || !/^\/[^/]+\/[^/]+\/pull\/\d+\/?$/.test(url.pathname)) {
+    throw new Error("review target must be a GitHub PR URL");
+  }
+  return value;
 }
 
 function freePort() {
@@ -149,9 +165,11 @@ async function listen(server, port) {
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  const options = parseArgs(argv);
-  if (options.help) return console.log(usage());
+  const review = argv[0] === "review";
+  const options = parseArgs(review ? argv.slice(1) : argv, review);
+  if (options.help) return console.log(usage(review));
   if (options.version) return console.log(VERSION);
+  if (review) return runReview(options);
   const openCodeVersion = checkVersion();
   const temporaryDirectory = options.directory ? null : await mkdtemp(join(tmpdir(), "opencode-as-openai-api-"));
   const directory = options.directory ?? temporaryDirectory;
@@ -186,7 +204,15 @@ export async function main(argv = process.argv.slice(2)) {
     const backend = new OpenCodeBackend(`http://127.0.0.1:${upstreamPort}`);
     await waitForBackend(backend, options.model, child);
     const token = process.env.OPENCODE_API_TOKEN || `oca_${randomBytes(32).toString("hex")}`;
-    gateway = createGateway({ model: options.model, variant: options.variant, token, backend, maxConcurrency: options.maxConcurrency, quickTunnel: options.tunnel === "quick" });
+    gateway = createGateway({
+      model: process.env.OPENCODE_API_MODEL || options.model,
+      upstreamModel: options.model,
+      variant: options.variant,
+      token,
+      backend,
+      maxConcurrency: options.maxConcurrency,
+      quickTunnel: options.tunnel === "quick",
+    });
     const port = await listen(gateway, options.port);
     const localUrl = `http://127.0.0.1:${port}/v1`;
     console.log(`Ready\nOpenCode: ${openCodeVersion}\nModel: ${options.model}\nBase URL: ${localUrl}\nAPI token: ${token}`);

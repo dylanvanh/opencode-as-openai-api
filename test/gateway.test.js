@@ -6,9 +6,9 @@ import { normalizeResponses, openCodeRequest, resultSchema } from "../src/transl
 const servers = [];
 afterEach(async () => Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve)))));
 
-async function fixture(result) {
+async function fixture(result, options = {}) {
   const backend = { toolIds: ["bash", "read", "write"], calls: [], async run(body) { this.calls.push(body); return result; } };
-  const server = createGateway({ model: "test/model", token: "secret", backend, logger: { info() {} } });
+  const server = createGateway({ model: "test/model", token: "secret", backend, logger: { info() {} }, ...options });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   servers.push(server);
   return { backend, url: `http://127.0.0.1:${server.address().port}` };
@@ -37,6 +37,23 @@ test("returns a non-streaming Responses text object and disables OpenCode tools"
   assert.equal(body.output[0].content[0].text, "Hello");
   assert.equal(body.usage.output_tokens, 3);
   assert.deepEqual(backend.calls[0].tools, { bash: false, read: false, write: false });
+});
+
+test("uses a public model alias without changing the OpenCode model", async () => {
+  // given
+  const upstreamModel = "anthropic/claude-sonnet";
+  const publicModel = "opencode-gateway/anthropic/claude-sonnet";
+  const { backend, url } = await fixture(
+    { info: { tokens: {} }, parts: [{ type: "text", text: "Hello" }] },
+    { model: publicModel, upstreamModel },
+  );
+
+  // when
+  const response = await request(url, "/v1/responses", { model: publicModel, input: "Hi" });
+
+  // then
+  assert.equal(response.status, 200);
+  assert.deepEqual(backend.calls[0].model, { providerID: "anthropic", modelID: "claude-sonnet" });
 });
 
 test("streams Responses events in order", async () => {

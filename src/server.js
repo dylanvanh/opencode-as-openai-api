@@ -79,7 +79,7 @@ function streamChat(res, result, completion) {
   res.end();
 }
 
-export function createGateway({ model, variant, token, backend, maxConcurrency = 1, quickTunnel = false, logger = console }) {
+export function createGateway({ model, upstreamModel = model, variant, token, backend, maxConcurrency = 1, quickTunnel = false, logger = console }) {
   let active = 0;
   const server = http.createServer(async (req, res) => {
     const started = Date.now();
@@ -119,7 +119,7 @@ export function createGateway({ model, variant, token, backend, maxConcurrency =
       try {
         timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
         res.once("close", disconnected);
-        const upstream = await backend.run(openCodeRequest(normalized, model, variant, backend.toolIds ?? []), controller.signal);
+        const upstream = await backend.run(openCodeRequest(normalized, upstreamModel, variant, backend.toolIds ?? []), controller.signal);
         const result = openCodeResult(upstream, normalized.tools.length > 0 && normalized.toolChoice.mode !== "none");
         if (kind === "responses") {
           const response = responseObject(result, model);
