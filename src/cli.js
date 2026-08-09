@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { randomBytes } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import { createGateway } from "./server.js";
@@ -230,6 +232,6 @@ export async function main(argv = process.argv.slice(2)) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error) => { console.error(`opencode-as-openai-api: ${error.message}`); process.exitCode = 1; });
 }
