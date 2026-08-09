@@ -190,7 +190,7 @@ export async function main(argv = process.argv.slice(2)) {
     const port = await listen(gateway, options.port);
     const localUrl = `http://127.0.0.1:${port}/v1`;
     console.log(`Ready\nOpenCode: ${openCodeVersion}\nModel: ${options.model}\nBase URL: ${localUrl}\nAPI token: ${token}`);
-    console.log(`\nMeat:\nOPENAI_BASE_URL=${localUrl}\nOPENAI_API_KEY=${token}`);
+    console.log(`\nClient configuration:\nOPENAI_BASE_URL=${localUrl}\nOPENAI_API_KEY=${token}`);
     if (options.tunnel === "quick") {
       const quick = startQuickTunnel(`http://127.0.0.1:${port}`);
       tunnel = quick.child;
