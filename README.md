@@ -46,16 +46,19 @@ The command starts a private gateway on a free port, sends the source diff throu
 macOS and Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/dylanvanh/opencode-as-openai-api/main/scripts/install.sh | bash
+gh api -H "Accept: application/vnd.github.raw+json" \
+  "repos/dylanvanh/opencode-as-openai-api/contents/scripts/install.sh?ref=main" | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/dylanvanh/opencode-as-openai-api/main/scripts/install.ps1 | iex
+gh api -H "Accept: application/vnd.github.raw+json" `
+  "repos/dylanvanh/opencode-as-openai-api/contents/scripts/install.ps1?ref=main" |
+  Out-String | Invoke-Expression
 ```
 
-The installer adds GitHub CLI, Node.js, Go, Bun, OpenCode, Meat, the Plannotator fork, and this package. Windows uses `winget`; macOS and Linux use their native package manager for Git and GitHub CLI. Run `gh auth login` before reviewing a GitHub pull request.
+Because this repository is private, the bootstrap command requires GitHub CLI authentication and repository access. Run `gh auth login` first. The installer adds or updates the remaining GitHub CLI setup, Node.js, Go, Bun, OpenCode, Meat, the Plannotator fork, and this package. Windows uses `winget`; macOS and Linux use their native package manager for Git and GitHub CLI.
 
 ## API
 

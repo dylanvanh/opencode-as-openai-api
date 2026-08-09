@@ -123,6 +123,12 @@ persist_path() {
 }
 
 install_system_tools
+if ! gh auth status >/dev/null 2>&1 || ! gh repo view dylanvanh/opencode-as-openai-api >/dev/null 2>&1; then
+  echo "Authenticate GitHub CLI with access to dylanvanh/opencode-as-openai-api, then run this installer again:" >&2
+  echo "  gh auth login" >&2
+  exit 1
+fi
+gh auth setup-git
 install_node
 install_go
 install_bun

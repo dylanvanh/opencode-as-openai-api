@@ -33,6 +33,13 @@ Install-WingetPackage "node" "OpenJS.NodeJS.LTS"
 Install-WingetPackage "go" "GoLang.Go"
 Install-WingetPackage "bun" "Oven-sh.Bun"
 
+& gh auth status 2>$null
+if ($LASTEXITCODE -ne 0) { throw "Run 'gh auth login' with access to dylanvanh/opencode-as-openai-api, then run this installer again." }
+& gh repo view dylanvanh/opencode-as-openai-api 1>$null 2>$null
+if ($LASTEXITCODE -ne 0) { throw "Your GitHub account cannot access dylanvanh/opencode-as-openai-api." }
+& gh auth setup-git
+if ($LASTEXITCODE -ne 0) { throw "Git credential setup failed" }
+
 $nodeMajor = [int]((& node --version).TrimStart("v").Split(".")[0])
 if ($nodeMajor -lt 20) {
     & winget upgrade --id "OpenJS.NodeJS.LTS" --exact --accept-package-agreements --accept-source-agreements
