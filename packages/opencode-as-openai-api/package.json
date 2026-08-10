@@ -7,15 +7,13 @@
     "opencode-as-openai-api": "dist/cli.js"
   },
   "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
+    "dist"
   ],
   "scripts": {
     "start": "npm run build && node dist/cli.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "npm run build && vitest run",
+    "test": "node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.json --noEmit false --outDir .test-dist --rootDir . && node --test .test-dist/test/*.test.js",
     "check": "npm run typecheck && npm test",
     "prepack": "npm run build"
   },

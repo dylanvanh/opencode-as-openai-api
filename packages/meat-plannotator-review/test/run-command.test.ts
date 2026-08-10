@@ -1,5 +1,6 @@
-import { expect, test } from "vitest";
-import { RunCommandError, runCommand } from "../src/_internal/run-command.js";
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { runCommand } from "../src/_internal/run-command.js";
 
 const FAILURE_EXIT_CODE = 7;
 
@@ -12,7 +13,24 @@ test("should return command output", async () => {
   const output = await runCommand(process.execPath, ["-e", script]);
 
   // then
-  expect(output).toBe(EXPECTED_OUTPUT);
+  assert.equal(output, EXPECTED_OUTPUT);
+});
+
+test("should use the selected working directory and environment", async () => {
+  // given
+  const ENVIRONMENT_VARIABLE_NAME = "MEAT_PLANNOTATOR_REVIEW_TEST_VALUE";
+  const EXPECTED_ENVIRONMENT_VALUE = "configured";
+  const EXPECTED_OUTPUT = `${process.cwd()}\n${EXPECTED_ENVIRONMENT_VALUE}`;
+  const script = `process.stdout.write(process.cwd() + "\\n" + process.env.${ENVIRONMENT_VARIABLE_NAME})`;
+
+  // when
+  const output = await runCommand(process.execPath, ["-e", script], {
+    workingDirectory: process.cwd(),
+    environment: { ...process.env, [ENVIRONMENT_VARIABLE_NAME]: EXPECTED_ENVIRONMENT_VALUE },
+  });
+
+  // then
+  assert.equal(output, EXPECTED_OUTPUT);
 });
 
 test("should write input to the command", async () => {
@@ -24,7 +42,22 @@ test("should write input to the command", async () => {
   const output = await runCommand(process.execPath, ["-e", script], { input: EXPECTED_OUTPUT });
 
   // then
-  expect(output).toBe(EXPECTED_OUTPUT);
+  assert.equal(output, EXPECTED_OUTPUT);
+});
+
+test("should write input to a command with inherited output", async () => {
+  // given
+  const EXPECTED_INPUT = "inherited command input";
+  const script = `let input = ""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => process.exit(input === ${JSON.stringify(EXPECTED_INPUT)} ? 0 : 1))`;
+
+  // when
+  const output = await runCommand(process.execPath, ["-e", script], {
+    input: EXPECTED_INPUT,
+    stdio: "inherit",
+  });
+
+  // then
+  assert.equal(output, "");
 });
 
 test("should return output for an accepted nonzero exit code", async () => {
@@ -38,10 +71,10 @@ test("should return output for an accepted nonzero exit code", async () => {
   });
 
   // then
-  expect(output).toBe(EXPECTED_OUTPUT);
+  assert.equal(output, EXPECTED_OUTPUT);
 });
 
-test("should return a typed error for a failed command", async () => {
+test("should return stderr for a failed command", async () => {
   // given
   const EXPECTED_ERROR = "command failed";
   const script = `process.stderr.write(${JSON.stringify(EXPECTED_ERROR)}); process.exitCode = ${FAILURE_EXIT_CODE}`;
@@ -50,16 +83,10 @@ test("should return a typed error for a failed command", async () => {
   const commandPromise = runCommand(process.execPath, ["-e", script]);
 
   // then
-  await expect(commandPromise).rejects.toMatchObject({
-    name: "RunCommandError",
-    message: EXPECTED_ERROR,
-    executable: process.execPath,
-    exitCode: FAILURE_EXIT_CODE,
-    signal: null,
-  } satisfies Partial<RunCommandError>);
+  await assert.rejects(commandPromise, new Error(EXPECTED_ERROR));
 });
 
-test("should return a typed error when the executable is missing", async () => {
+test("should return an error when the executable is missing", async () => {
   // given
   const missingExecutable = "meat-plannotator-review-command-that-does-not-exist";
 
@@ -67,13 +94,10 @@ test("should return a typed error when the executable is missing", async () => {
   const commandPromise = runCommand(missingExecutable, []);
 
   // then
-  await expect(commandPromise).rejects.toMatchObject({
-    name: "RunCommandError",
-    message: `${missingExecutable} is not installed or is not in PATH`,
-    executable: missingExecutable,
-    exitCode: null,
-    signal: null,
-  } satisfies Partial<RunCommandError>);
+  await assert.rejects(
+    commandPromise,
+    new Error(`${missingExecutable} is not installed or is not in PATH`),
+  );
 });
 
 test("should terminate a command when its signal is aborted", async () => {
@@ -87,8 +111,5 @@ test("should terminate a command when its signal is aborted", async () => {
   abortController.abort();
 
   // then
-  await expect(commandPromise).rejects.toMatchObject({
-    name: "RunCommandError",
-    message: `${process.execPath} was aborted`,
-  } satisfies Partial<RunCommandError>);
+  await assert.rejects(commandPromise, new Error(`${process.execPath} was aborted`));
 });

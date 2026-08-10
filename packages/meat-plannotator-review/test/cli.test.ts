@@ -1,6 +1,6 @@
-import { resolve } from "node:path";
-import { describe, expect, test } from "vitest";
-import { CliInputError, parseCliArguments } from "../src/cli.js";
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import { parseCliArguments } from "../src/cli.js";
 
 const MODEL = "provider/model";
 const PULL_REQUEST_URL = "https://github.com/acme/repository/pull/12";
@@ -24,12 +24,12 @@ describe("parseCliArguments", () => {
     const action = parseCliArguments(arguments_);
 
     // then
-    expect(action).toEqual({
+    assert.deepEqual(action, {
       kind: "review",
       options: {
         openCodeModel: MODEL,
         openCodeVariant: "high",
-        openCodeDirectory: resolve(directory),
+        openCodeDirectory: directory,
         baseRef: "origin/trunk",
       },
     });
@@ -43,7 +43,7 @@ describe("parseCliArguments", () => {
     const action = parseCliArguments(arguments_);
 
     // then
-    expect(action).toEqual({
+    assert.deepEqual(action, {
       kind: "review",
       options: { openCodeModel: MODEL, pullRequestUrl: PULL_REQUEST_URL },
     });
@@ -57,7 +57,7 @@ describe("parseCliArguments", () => {
     const action = parseCliArguments(arguments_);
 
     // then
-    expect(action).toEqual({ kind: "help" });
+    assert.deepEqual(action, { kind: "help" });
   });
 
   test("should return the version action without a model", () => {
@@ -68,7 +68,7 @@ describe("parseCliArguments", () => {
     const action = parseCliArguments(arguments_);
 
     // then
-    expect(action).toEqual({ kind: "version" });
+    assert.deepEqual(action, { kind: "version" });
   });
 
   test("should reject a value option followed by another option", () => {
@@ -79,7 +79,7 @@ describe("parseCliArguments", () => {
     const parseArguments = (): ReturnType<typeof parseCliArguments> => parseCliArguments(arguments_);
 
     // then
-    expect(parseArguments).toThrowError(new CliInputError("--model requires a value"));
+    assert.throws(parseArguments, /--model/);
   });
 
   test("should reject a value option without a value", () => {
@@ -90,7 +90,18 @@ describe("parseCliArguments", () => {
     const parseArguments = (): ReturnType<typeof parseCliArguments> => parseCliArguments(arguments_);
 
     // then
-    expect(parseArguments).toThrowError(new CliInputError("--model requires a value"));
+    assert.throws(parseArguments, /--model/);
+  });
+
+  test("should reject an empty option value", () => {
+    // given
+    const arguments_ = ["--model", MODEL, "--variant="];
+
+    // when
+    const parseArguments = (): ReturnType<typeof parseCliArguments> => parseCliArguments(arguments_);
+
+    // then
+    assert.throws(parseArguments, new Error("--variant requires a value"));
   });
 
   test("should reject a review without a model", () => {
@@ -101,7 +112,7 @@ describe("parseCliArguments", () => {
     const parseArguments = (): ReturnType<typeof parseCliArguments> => parseCliArguments(arguments_);
 
     // then
-    expect(parseArguments).toThrowError(new CliInputError("--model is required"));
+    assert.throws(parseArguments, new Error("--model is required"));
   });
 
   test("should reject an unknown option", () => {
@@ -112,7 +123,7 @@ describe("parseCliArguments", () => {
     const parseArguments = (): ReturnType<typeof parseCliArguments> => parseCliArguments(arguments_);
 
     // then
-    expect(parseArguments).toThrowError(new CliInputError("unknown option: --unknown"));
+    assert.throws(parseArguments, /--unknown/);
   });
 
   test("should reject a model without provider and model parts", () => {
@@ -123,7 +134,7 @@ describe("parseCliArguments", () => {
     const parseArguments = (): ReturnType<typeof parseCliArguments> => parseCliArguments(arguments_);
 
     // then
-    expect(parseArguments).toThrowError(/provider\/model format/);
+    assert.throws(parseArguments, /provider\/model format/);
   });
 
   test("should reject a non-GitHub review target", () => {
@@ -134,7 +145,7 @@ describe("parseCliArguments", () => {
     const parseArguments = (): ReturnType<typeof parseCliArguments> => parseCliArguments(arguments_);
 
     // then
-    expect(parseArguments).toThrowError(/GitHub PR URL/);
+    assert.throws(parseArguments, /GitHub PR URL/);
   });
 
   test("should reject a GitHub pull request URL with query parameters", () => {
@@ -145,7 +156,7 @@ describe("parseCliArguments", () => {
     const parseArguments = (): ReturnType<typeof parseCliArguments> => parseCliArguments(arguments_);
 
     // then
-    expect(parseArguments).toThrowError(/GitHub PR URL/);
+    assert.throws(parseArguments, /GitHub PR URL/);
   });
 
   test("should reject a base for a GitHub pull request review", () => {
@@ -156,6 +167,6 @@ describe("parseCliArguments", () => {
     const parseArguments = (): ReturnType<typeof parseCliArguments> => parseCliArguments(arguments_);
 
     // then
-    expect(parseArguments).toThrowError(/--base cannot/);
+    assert.throws(parseArguments, /--base cannot/);
   });
 });

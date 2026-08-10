@@ -49,7 +49,6 @@ export interface TranscriptEntry {
 }
 
 export interface NormalizedRequest {
-  kind: "responses" | "chat";
   stream: boolean;
   transcript: TranscriptEntry[];
   tools: NormalizedTool[];
@@ -93,7 +92,7 @@ export type OpenCodeResult =
   | { type: "text"; text: string; usage: TokenUsage }
   | { type: "function_call"; name: string; arguments: string; callId: string; usage: TokenUsage };
 
-export type ResponseOutputItem =
+type ResponseOutputItem =
   | {
     type: "message";
     id: string;
@@ -110,38 +109,6 @@ export type ResponseOutputItem =
     status: "completed";
   };
 
-export interface ResponsesApiObject {
-  id: string;
-  object: "response";
-  created_at: number;
-  status: "completed";
-  completed_at: number;
-  error: null;
-  incomplete_details: null;
-  instructions: null;
-  max_output_tokens: null;
-  model: string;
-  output: [ResponseOutputItem];
-  parallel_tool_calls: false;
-  previous_response_id: null;
-  reasoning: { effort: null; summary: null };
-  store: false;
-  temperature: number;
-  text: { format: { type: "text" } };
-  tool_choice: "auto";
-  tools: [];
-  top_p: number;
-  truncation: "disabled";
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
-    output_tokens_details: { reasoning_tokens: number };
-    total_tokens: number;
-  };
-  user: null;
-  metadata: UnknownRecord;
-}
-
 type ChatMessage =
   | { role: "assistant"; content: string; refusal: null }
   | {
@@ -149,25 +116,6 @@ type ChatMessage =
     content: null;
     tool_calls: [{ id: string; type: "function"; function: { name: string; arguments: string } }];
   };
-
-export interface ChatCompletionObject {
-  id: string;
-  object: "chat.completion";
-  created: number;
-  model: string;
-  choices: [{
-    index: 0;
-    message: ChatMessage;
-    logprobs: null;
-    finish_reason: "tool_calls" | "stop";
-  }];
-  usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-    completion_tokens_details: { reasoning_tokens: number };
-  };
-}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -222,7 +170,7 @@ export function normalizeResponsesRequest(body: unknown, lockedModel: string): N
     throw invalidRequest("input must be text or an array", "input");
   }
 
-  return { kind: "responses", stream: normalizeStream(requestBody["stream"]), transcript, tools, toolChoice };
+  return { stream: normalizeStream(requestBody["stream"]), transcript, tools, toolChoice };
 }
 
 export function normalizeChatCompletionsRequest(body: unknown, lockedModel: string): NormalizedRequest {
@@ -237,7 +185,7 @@ export function normalizeChatCompletionsRequest(body: unknown, lockedModel: stri
   const tools = normalizeTools(requestBody["tools"], true);
   const toolChoice = normalizeToolChoice(requestBody["tool_choice"], tools, true);
   const transcript = messages.map(normalizeChatMessage);
-  return { kind: "chat", stream: normalizeStream(requestBody["stream"]), transcript, tools, toolChoice };
+  return { stream: normalizeStream(requestBody["stream"]), transcript, tools, toolChoice };
 }
 
 export function createOpenCodeRequest(
@@ -301,14 +249,7 @@ export function parseOpenCodeResult(value: unknown, structuredOutput: Structured
   const usage = usageOf(info);
   if (!structuredOutput) return { type: "text", text, usage };
 
-  let output = info["structured"] ?? info["output"];
-  if (output == null && text) {
-    try {
-      output = JSON.parse(text);
-    } catch {
-      throw invalidStructuredOutput();
-    }
-  }
+  const output = info["structured"];
   if (!isRecord(output)) throw invalidStructuredOutput();
 
   if (output["type"] === "text") {
@@ -344,7 +285,7 @@ export function createResponsesApiObject(
   model: string,
   id = `resp_${randomUUID().replaceAll("-", "")}`,
   createdSeconds = Math.floor(Date.now() / MILLISECONDS_PER_SECOND),
-): ResponsesApiObject {
+) {
   const output: [ResponseOutputItem] = result.type === "function_call"
     ? [{
       type: "function_call",
@@ -399,7 +340,7 @@ export function createChatCompletionObject(
   model: string,
   id = `chatcmpl-${randomUUID().replaceAll("-", "")}`,
   createdSeconds = Math.floor(Date.now() / MILLISECONDS_PER_SECOND),
-): ChatCompletionObject {
+) {
   const message: ChatMessage = result.type === "function_call"
     ? {
       role: "assistant",
@@ -652,22 +593,12 @@ function upstreamResponseObject(value: unknown): UnknownRecord {
 }
 
 function responseInfo(response: UnknownRecord): UnknownRecord {
-  if (response["info"] != null) {
-    if (isRecord(response["info"])) return response["info"];
-    throw invalidUpstream("OpenCode returned invalid response info");
-  }
-  const data = response["data"];
-  if (!isRecord(data)) return response;
-  if (data["info"] != null) {
-    if (isRecord(data["info"])) return data["info"];
-    throw invalidUpstream("OpenCode returned invalid response info");
-  }
-  return data;
+  if (isRecord(response["info"])) return response["info"];
+  throw invalidUpstream("OpenCode returned invalid response info");
 }
 
 function responseText(response: UnknownRecord): string {
-  const data = response["data"];
-  const parts = response["parts"] ?? (isRecord(data) ? data["parts"] : undefined) ?? [];
+  const parts = response["parts"];
   if (!Array.isArray(parts)) throw invalidUpstream("OpenCode returned invalid message parts");
   return parts.map((part) => {
     if (!isRecord(part) || part["type"] !== "text") return "";

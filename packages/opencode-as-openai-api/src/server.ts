@@ -15,19 +15,15 @@ import {
   normalizeChatCompletionsRequest,
   normalizeResponsesRequest,
   parseOpenCodeResult,
-  splitModel,
-  type ChatCompletionObject,
   type NormalizedRequest,
   type OpenCodeRequestBody,
   type OpenCodeResult,
-  type ResponsesApiObject,
   type StructuredOutputPolicy,
 } from "./translate.js";
 
 const BODY_LIMIT_BYTES = 1_048_576;
 const UPSTREAM_TIMEOUT_5_MINUTES_MS = 5 * 60 * 1_000;
-const MIN_CONCURRENCY = 1;
-const MAX_CONCURRENCY = Number.MAX_SAFE_INTEGER;
+const MAX_CONCURRENT_REQUESTS = 1;
 const HTTP_OK_STATUS = 200;
 const HTTP_BAD_REQUEST_STATUS = 400;
 const HTTP_UNAUTHORIZED_STATUS = 401;
@@ -57,40 +53,17 @@ export interface GatewayConfiguration {
   variant?: string;
   token: string;
   backend: GatewayBackend;
-  maxConcurrency?: number;
-  quickTunnel?: boolean;
   logger?: GatewayLogger;
 }
 
-interface ValidatedGatewayConfiguration {
-  model: string;
-  upstreamModel: string;
-  variant: string | undefined;
-  token: string;
-  backend: GatewayBackend;
-  maxConcurrency: number;
-  quickTunnel: boolean;
-  logger: GatewayLogger;
-}
-
-export class GatewayConfigurationError extends TypeError {
-  constructor(message: string) {
-    super(message);
-    this.name = "GatewayConfigurationError";
-  }
-}
-
-export function createGateway(configuration: GatewayConfiguration): Server {
-  const {
-    model,
-    upstreamModel,
-    variant,
-    token,
-    backend,
-    maxConcurrency,
-    quickTunnel,
-    logger,
-  } = validateGatewayConfiguration(configuration);
+export function createGateway({
+  model,
+  upstreamModel = model,
+  variant,
+  token,
+  backend,
+  logger = console,
+}: GatewayConfiguration): Server {
   let activeRequests = 0;
 
   return createServer(async (request, response) => {
@@ -136,16 +109,7 @@ export function createGateway(configuration: GatewayConfiguration): Server {
       const normalized = kind === "responses"
         ? normalizeResponsesRequest(body, model)
         : normalizeChatCompletionsRequest(body, model);
-      if (quickTunnel && normalized.stream && (request.headers["cf-ray"] || request.headers["cf-visitor"])) {
-        throw new ApiError(
-          HTTP_BAD_REQUEST_STATUS,
-          "TryCloudflare does not support streaming. Use the local URL or omit stream.",
-          "invalid_request_error",
-          "stream",
-          "streaming_not_supported",
-        );
-      }
-      if (activeRequests >= maxConcurrency) {
+      if (activeRequests >= MAX_CONCURRENT_REQUESTS) {
         status = HTTP_TOO_MANY_REQUESTS_STATUS;
         sendJson(
           response,
@@ -206,60 +170,6 @@ export function createGateway(configuration: GatewayConfiguration): Server {
       logger.info?.(`${requestId} ${request.method} ${route} ${status} ${Date.now() - startedAtMilliseconds}ms`);
     }
   });
-}
-
-function validateGatewayConfiguration(value: unknown): ValidatedGatewayConfiguration {
-  if (!isRecord(value)) throw new GatewayConfigurationError("gateway configuration must be an object");
-  const model = configurationString(value["model"], "model");
-  const upstreamModel = value["upstreamModel"] === undefined
-    ? model
-    : configurationString(value["upstreamModel"], "upstreamModel");
-  try {
-    splitModel(upstreamModel);
-  } catch {
-    throw new GatewayConfigurationError("upstreamModel must use the provider/model format");
-  }
-  const variant = optionalConfigurationString(value["variant"], "variant");
-  const token = configurationString(value["token"], "token");
-  const backend = value["backend"];
-  if (!isGatewayBackend(backend)) {
-    throw new GatewayConfigurationError("backend must provide run() and string toolIds");
-  }
-  const maxConcurrency = value["maxConcurrency"] ?? MIN_CONCURRENCY;
-  if (
-    typeof maxConcurrency !== "number"
-    || !Number.isSafeInteger(maxConcurrency)
-    || maxConcurrency < MIN_CONCURRENCY
-    || maxConcurrency > MAX_CONCURRENCY
-  ) {
-    throw new GatewayConfigurationError("maxConcurrency must be a positive safe integer");
-  }
-  const quickTunnel = value["quickTunnel"] ?? false;
-  if (typeof quickTunnel !== "boolean") throw new GatewayConfigurationError("quickTunnel must be a boolean");
-  const logger = value["logger"] ?? console;
-  if (!isGatewayLogger(logger)) throw new GatewayConfigurationError("logger.info must be a function");
-  return { model, upstreamModel, variant, token, backend, maxConcurrency, quickTunnel, logger };
-}
-
-function configurationString(value: unknown, field: string): string {
-  if (typeof value === "string" && value.length > 0) return value;
-  throw new GatewayConfigurationError(`${field} must be a non-empty string`);
-}
-
-function optionalConfigurationString(value: unknown, field: string): string | undefined {
-  if (value === undefined) return undefined;
-  return configurationString(value, field);
-}
-
-function isGatewayBackend(value: unknown): value is GatewayBackend {
-  if (!isRecord(value) || typeof value["run"] !== "function") return false;
-  const toolIds = value["toolIds"];
-  return toolIds === undefined || (Array.isArray(toolIds) && toolIds.every((toolId) => typeof toolId === "string"));
-}
-
-function isGatewayLogger(value: unknown): value is GatewayLogger {
-  if (!isRecord(value)) return false;
-  return value["info"] === undefined || typeof value["info"] === "function";
 }
 
 function requestKind(pathname: string): "responses" | "chat" | null {
@@ -377,10 +287,6 @@ function sendJson(
   response.end(data);
 }
 
-function writeTypedSseEvent(response: ServerResponse, event: UnknownRecord): void {
-  response.write(`event: ${String(event["type"])}\ndata: ${JSON.stringify(event)}\n\n`);
-}
-
 function startSse(response: ServerResponse): void {
   response.writeHead(HTTP_OK_STATUS, {
     "content-type": "text/event-stream",
@@ -394,11 +300,12 @@ function startSse(response: ServerResponse): void {
 function streamResponse(
   serverResponse: ServerResponse,
   result: OpenCodeResult,
-  apiResponse: ResponsesApiObject,
+  apiResponse: ReturnType<typeof createResponsesApiObject>,
 ): void {
   let sequenceNumber = 1;
   const emit = (event: UnknownRecord): void => {
-    writeTypedSseEvent(serverResponse, { ...event, sequence_number: sequenceNumber });
+    const sequencedEvent = { ...event, sequence_number: sequenceNumber };
+    serverResponse.write(`event: ${String(event["type"])}\ndata: ${JSON.stringify(sequencedEvent)}\n\n`);
     sequenceNumber += 1;
   };
   const pendingResponse = { ...apiResponse, status: "in_progress", completed_at: null, output: [], usage: null };
@@ -435,7 +342,7 @@ function streamResponse(
 function streamChat(
   response: ServerResponse,
   result: OpenCodeResult,
-  completion: ChatCompletionObject,
+  completion: ReturnType<typeof createChatCompletionObject>,
 ): void {
   const base = {
     id: completion.id,

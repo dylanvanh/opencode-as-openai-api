@@ -1,4 +1,5 @@
-import { expect, test } from "vitest";
+import assert from "node:assert/strict";
+import { test } from "node:test";
 import {
   createOpenCodeRequest,
   createResultSchema,
@@ -45,7 +46,7 @@ test("rejects a non-object request body at the translation boundary", () => {
   const normalizeInvalidBody = (): unknown => normalizeResponsesRequest(requestBody, MODEL);
 
   // then
-  expect(normalizeInvalidBody).toThrow("request body must be a JSON object");
+  assert.throws(normalizeInvalidBody, /request body must be a JSON object/);
 });
 
 test("rejects required tool choice without tools", () => {
@@ -56,7 +57,7 @@ test("rejects required tool choice without tools", () => {
   const normalizeRequiredTool = (): unknown => normalizeResponsesRequest(requestBody, MODEL);
 
   // then
-  expect(normalizeRequiredTool).toThrow("tool_choice requires at least one function tool");
+  assert.throws(normalizeRequiredTool, /tool_choice requires at least one function tool/);
 });
 
 test("rejects a non-boolean stream option", () => {
@@ -67,7 +68,7 @@ test("rejects a non-boolean stream option", () => {
   const normalizeInvalidStream = (): unknown => normalizeResponsesRequest(requestBody, MODEL);
 
   // then
-  expect(normalizeInvalidStream).toThrow("stream must be a boolean");
+  assert.throws(normalizeInvalidStream, /stream must be a boolean/);
 });
 
 test("rejects duplicate function names", () => {
@@ -85,7 +86,7 @@ test("rejects duplicate function names", () => {
   const normalizeDuplicateTools = (): unknown => normalizeResponsesRequest(requestBody, MODEL);
 
   // then
-  expect(normalizeDuplicateTools).toThrow(`duplicate function name: ${TOOL_NAME}`);
+  assert.throws(normalizeDuplicateTools, new RegExp(`duplicate function name: ${TOOL_NAME}`));
 });
 
 test("rejects an invalid function name", () => {
@@ -100,7 +101,7 @@ test("rejects an invalid function name", () => {
   const normalizeInvalidTool = (): unknown => normalizeResponsesRequest(requestBody, MODEL);
 
   // then
-  expect(normalizeInvalidTool).toThrow("function name must use 1-64 letters");
+  assert.throws(normalizeInvalidTool, /function name must use 1-64 letters/);
 });
 
 test("rejects structured Responses output formats", () => {
@@ -115,7 +116,7 @@ test("rejects structured Responses output formats", () => {
   const normalizeStructuredResponse = (): unknown => normalizeResponsesRequest(requestBody, MODEL);
 
   // then
-  expect(normalizeStructuredResponse).toThrow("text is not supported");
+  assert.throws(normalizeStructuredResponse, /text is not supported/);
 });
 
 test("rejects structured Chat Completions output formats", () => {
@@ -130,23 +131,25 @@ test("rejects structured Chat Completions output formats", () => {
   const normalizeStructuredChat = (): unknown => normalizeChatCompletionsRequest(requestBody, MODEL);
 
   // then
-  expect(normalizeStructuredChat).toThrow("response_format is not supported");
+  assert.throws(normalizeStructuredChat, /response_format is not supported/);
 });
 
-test.each([[], { type: "array" }])("rejects non-object function parameters", (parameters) => {
-  // given
-  const requestBody = {
-    model: MODEL,
-    input: "Hi",
-    tools: [{ type: "function", name: TOOL_NAME, parameters }],
-  };
+for (const parameters of [[], { type: "array" }]) {
+  test("rejects non-object function parameters", () => {
+    // given
+    const requestBody = {
+      model: MODEL,
+      input: "Hi",
+      tools: [{ type: "function", name: TOOL_NAME, parameters }],
+    };
 
-  // when
-  const normalizeInvalidParameters = (): unknown => normalizeResponsesRequest(requestBody, MODEL);
+    // when
+    const normalizeInvalidParameters = (): unknown => normalizeResponsesRequest(requestBody, MODEL);
 
-  // then
-  expect(normalizeInvalidParameters).toThrow("function parameters must be an object");
-});
+    // then
+    assert.throws(normalizeInvalidParameters, /function parameters must be an object/);
+  });
+}
 
 test("builds a strict per-function result schema", () => {
   // given
@@ -156,13 +159,14 @@ test("builds a strict per-function result schema", () => {
   const schema = createResultSchema(tools, "required");
 
   // then
-  expect(schema).toMatchObject({
+  assert.deepEqual(schema, {
     type: "object",
     oneOf: [{
       type: "object",
       additionalProperties: false,
       required: ["type", "name", "arguments"],
       properties: {
+        type: { const: "function_call" },
         name: { const: TOOL_NAME },
         arguments: WEATHER_TOOL.parameters,
       },
@@ -179,8 +183,8 @@ test("uses the upstream model and disables OpenCode tools", () => {
   const request = createOpenCodeRequest(normalized, MODEL, null, disabledToolIds);
 
   // then
-  expect(request.model).toEqual({ providerID: "test", modelID: "model" });
-  expect(request.tools).toEqual({ bash: false });
+  assert.deepEqual(request.model, { providerID: "test", modelID: "model" });
+  assert.deepEqual(request.tools, { bash: false });
 });
 
 test("disables an OpenCode tool named __proto__", () => {
@@ -192,8 +196,8 @@ test("disables an OpenCode tool named __proto__", () => {
   const request = createOpenCodeRequest(normalized, MODEL, null, disabledToolIds);
 
   // then
-  expect(Object.hasOwn(request.tools, "__proto__")).toBe(true);
-  expect(JSON.stringify(request.tools)).toBe('{"__proto__":false}');
+  assert.equal(Object.hasOwn(request.tools, "__proto__"), true);
+  assert.equal(JSON.stringify(request.tools), '{"__proto__":false}');
 });
 
 test("accepts an allowed structured function call", () => {
@@ -210,11 +214,9 @@ test("accepts an allowed structured function call", () => {
   const result = parseOpenCodeResult(upstreamResponse, REQUIRED_TOOL_POLICY);
 
   // then
-  expect(result).toMatchObject({
-    type: "function_call",
-    name: TOOL_NAME,
-    arguments: "{\"city\":\"Cape Town\"}",
-  });
+  assert.equal(result.type, "function_call");
+  assert.equal(result.name, TOOL_NAME);
+  assert.equal(result.arguments, "{\"city\":\"Cape Town\"}");
 });
 
 test("rejects a structured function name outside the request policy", () => {
@@ -231,7 +233,7 @@ test("rejects a structured function name outside the request policy", () => {
   const translateUnknownFunction = (): unknown => parseOpenCodeResult(upstreamResponse, REQUIRED_TOOL_POLICY);
 
   // then
-  expect(translateUnknownFunction).toThrow("invalid structured output");
+  assert.throws(translateUnknownFunction, /invalid structured output/);
 });
 
 test("rejects text when tool choice is required", () => {
@@ -245,22 +247,24 @@ test("rejects text when tool choice is required", () => {
   const translateText = (): unknown => parseOpenCodeResult(upstreamResponse, REQUIRED_TOOL_POLICY);
 
   // then
-  expect(translateText).toThrow("invalid structured output");
+  assert.throws(translateText, /invalid structured output/);
 });
 
-test.each([
+for (const { label, output } of [
   { label: "array arguments", output: { type: "function_call", name: TOOL_NAME, arguments: [] } },
   { label: "extra fields", output: { type: "function_call", name: TOOL_NAME, arguments: {}, extra: true } },
-])("rejects structured function output with $label", ({ output }) => {
-  // given
-  const upstreamResponse = { info: { structured: output, tokens: {} }, parts: [] };
+]) {
+  test(`rejects structured function output with ${label}`, () => {
+    // given
+    const upstreamResponse = { info: { structured: output, tokens: {} }, parts: [] };
 
-  // when
-  const translateInvalidOutput = (): unknown => parseOpenCodeResult(upstreamResponse, REQUIRED_TOOL_POLICY);
+    // when
+    const translateInvalidOutput = (): unknown => parseOpenCodeResult(upstreamResponse, REQUIRED_TOOL_POLICY);
 
-  // then
-  expect(translateInvalidOutput).toThrow("invalid structured output");
-});
+    // then
+    assert.throws(translateInvalidOutput, /invalid structured output/);
+  });
+}
 
 test("adds reasoning tokens to output and total usage", () => {
   // given
@@ -273,7 +277,7 @@ test("adds reasoning tokens to output and total usage", () => {
   const result = parseOpenCodeResult(upstreamResponse, null);
 
   // then
-  expect(result.usage).toEqual({
+  assert.deepEqual(result.usage, {
     input: INPUT_TOKENS,
     output: EXPECTED_OUTPUT_TOKENS,
     reasoning: REASONING_TOKENS,
@@ -281,16 +285,18 @@ test("adds reasoning tokens to output and total usage", () => {
   });
 });
 
-test.each(INVALID_TOKEN_COUNTS)("rejects an invalid token count: %j", (invalidTokenCount) => {
-  // given
-  const upstreamResponse = {
-    info: { tokens: { input: invalidTokenCount } },
-    parts: [{ type: "text", text: "Hello" }],
-  };
+for (const invalidTokenCount of INVALID_TOKEN_COUNTS) {
+  test(`rejects an invalid token count: ${JSON.stringify(invalidTokenCount)}`, () => {
+    // given
+    const upstreamResponse = {
+      info: { tokens: { input: invalidTokenCount } },
+      parts: [{ type: "text", text: "Hello" }],
+    };
 
-  // when
-  const translateInvalidUsage = (): unknown => parseOpenCodeResult(upstreamResponse, null);
+    // when
+    const translateInvalidUsage = (): unknown => parseOpenCodeResult(upstreamResponse, null);
 
-  // then
-  expect(translateInvalidUsage).toThrow("invalid token usage");
-});
+    // then
+    assert.throws(translateInvalidUsage, /invalid token usage/);
+  });
+}

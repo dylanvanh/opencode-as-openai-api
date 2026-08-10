@@ -1,5 +1,6 @@
+import assert from "node:assert/strict";
 import { type Server } from "node:http";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, test } from "node:test";
 import {
   createGateway,
   type GatewayBackend,
@@ -17,6 +18,7 @@ const HTTP_OK_STATUS = 200;
 const HTTP_BAD_REQUEST_STATUS = 400;
 const HTTP_UNAUTHORIZED_STATUS = 401;
 const HTTP_NOT_FOUND_STATUS = 404;
+const HTTP_TOO_MANY_REQUESTS_STATUS = 429;
 const HTTP_BAD_GATEWAY_STATUS = 502;
 const INPUT_TOKENS = 3;
 const GENERATED_TOKENS = 2;
@@ -29,7 +31,7 @@ type UnknownRecord = Record<string, unknown>;
 interface FixtureOptions {
   model?: string;
   upstreamModel?: string;
-  quickTunnel?: boolean;
+  run?: GatewayBackend["run"];
 }
 
 interface GatewayFixture {
@@ -58,7 +60,7 @@ test("requires gateway authentication", async () => {
   const response = await fetch(`${url}/v1/models`);
 
   // then
-  expect(response.status).toBe(HTTP_UNAUTHORIZED_STATUS);
+  assert.equal(response.status, HTTP_UNAUTHORIZED_STATUS);
 });
 
 test("lists only the locked model", async () => {
@@ -70,8 +72,8 @@ test("lists only the locked model", async () => {
   const body = await responseJson(response);
 
   // then
-  expect(response.status).toBe(HTTP_OK_STATUS);
-  expect(body).toEqual({
+  assert.equal(response.status, HTTP_OK_STATUS);
+  assert.deepEqual(body, {
     object: "list",
     data: [{ id: MODEL, object: "model", created: 0, owned_by: "opencode" }],
   });
@@ -87,8 +89,8 @@ test("uses a public model alias without changing the OpenCode model", async () =
   const response = await postJson(url, "/v1/responses", { model: publicModel, input: "Hi" });
 
   // then
-  expect(response.status).toBe(HTTP_OK_STATUS);
-  expect(calls.at(0)?.model).toEqual({ providerID: "anthropic", modelID: "claude-sonnet" });
+  assert.equal(response.status, HTTP_OK_STATUS);
+  assert.deepEqual(calls.at(0)?.model, { providerID: "anthropic", modelID: "claude-sonnet" });
 });
 
 test("returns a non-streaming Responses text object with token usage", async () => {
@@ -104,10 +106,16 @@ test("returns a non-streaming Responses text object with token usage", async () 
   const body = await responseJson(response);
 
   // then
-  expect(body).toMatchObject({
-    output: [{ content: [{ text: "Hello" }] }],
-    usage: { input_tokens: INPUT_TOKENS, output_tokens: TOTAL_OUTPUT_TOKENS },
-  });
+  const output = body["output"];
+  assert.ok(Array.isArray(output));
+  assert.ok(isRecord(output[0]));
+  const content = output[0]["content"];
+  assert.ok(Array.isArray(content));
+  assert.ok(isRecord(content[0]));
+  assert.equal(content[0]["text"], "Hello");
+  assert.ok(isRecord(body["usage"]));
+  assert.equal(body["usage"]["input_tokens"], INPUT_TOKENS);
+  assert.equal(body["usage"]["output_tokens"], TOTAL_OUTPUT_TOKENS);
 });
 
 test("disables all OpenCode tools for each request", async () => {
@@ -118,7 +126,7 @@ test("disables all OpenCode tools for each request", async () => {
   await postJson(url, "/v1/responses", { model: MODEL, input: "Hi" });
 
   // then
-  expect(calls.at(0)?.tools).toEqual({ bash: false, read: false, write: false });
+  assert.deepEqual(calls.at(0)?.tools, { bash: false, read: false, write: false });
 });
 
 test("streams Responses events in order", async () => {
@@ -130,10 +138,10 @@ test("streams Responses events in order", async () => {
   const events = parseSseEvents(await response.text());
 
   // then
-  expect(response.headers.get("content-type")).toBe("text/event-stream");
-  expect(events.at(0)?.type).toBe("response.created");
-  expect(events.some((event) => event.type === "response.output_text.delta" && event["delta"] === "Hello")).toBe(true);
-  expect(events.at(-1)?.type).toBe("response.completed");
+  assert.equal(response.headers.get("content-type"), "text/event-stream");
+  assert.equal(events.at(0)?.type, "response.created");
+  assert.equal(events.some((event) => event.type === "response.output_text.delta" && event["delta"] === "Hello"), true);
+  assert.equal(events.at(-1)?.type, "response.completed");
 });
 
 test("returns a caller-owned function call through Responses", async () => {
@@ -167,9 +175,12 @@ test("returns a caller-owned function call through Responses", async () => {
   const body = await responseJson(response);
 
   // then
-  expect(body).toMatchObject({
-    output: [{ type: "function_call", name: "shell", arguments: "{\"command\":\"pwd\"}" }],
-  });
+  const output = body["output"];
+  assert.ok(Array.isArray(output));
+  assert.ok(isRecord(output[0]));
+  assert.equal(output[0]["type"], "function_call");
+  assert.equal(output[0]["name"], "shell");
+  assert.equal(output[0]["arguments"], "{\"command\":\"pwd\"}");
 });
 
 test("returns Chat Completions text", async () => {
@@ -184,7 +195,12 @@ test("returns Chat Completions text", async () => {
   const body = await responseJson(response);
 
   // then
-  expect(body).toMatchObject({ choices: [{ message: { role: "assistant", content: "Hello" } }] });
+  const choices = body["choices"];
+  assert.ok(Array.isArray(choices));
+  assert.ok(isRecord(choices[0]));
+  assert.ok(isRecord(choices[0]["message"]));
+  assert.equal(choices[0]["message"]["role"], "assistant");
+  assert.equal(choices[0]["message"]["content"], "Hello");
 });
 
 test("streams Chat Completions as data-only server-sent events", async () => {
@@ -200,10 +216,10 @@ test("streams Chat Completions as data-only server-sent events", async () => {
   const body = await response.text();
 
   // then
-  expect(response.headers.get("content-type")).toBe("text/event-stream");
-  expect(body).not.toContain("event: undefined");
-  expect(body).toContain('data: {"id":"chatcmpl-');
-  expect(body).toContain("data: [DONE]\n\n");
+  assert.equal(response.headers.get("content-type"), "text/event-stream");
+  assert.doesNotMatch(body, /event: undefined/);
+  assert.match(body, /data: \{"id":"chatcmpl-/);
+  assert.match(body, /data: \[DONE\]\n\n/);
 });
 
 test("returns caller-owned function calls through Chat Completions", async () => {
@@ -236,12 +252,16 @@ test("returns caller-owned function calls through Chat Completions", async () =>
   const body = await responseJson(response);
 
   // then
-  expect(body).toMatchObject({
-    choices: [{
-      finish_reason: "tool_calls",
-      message: { tool_calls: [{ function: { name: "weather" } }] },
-    }],
-  });
+  const choices = body["choices"];
+  assert.ok(Array.isArray(choices));
+  assert.ok(isRecord(choices[0]));
+  assert.equal(choices[0]["finish_reason"], "tool_calls");
+  assert.ok(isRecord(choices[0]["message"]));
+  const toolCalls = choices[0]["message"]["tool_calls"];
+  assert.ok(Array.isArray(toolCalls));
+  assert.ok(isRecord(toolCalls[0]));
+  assert.ok(isRecord(toolCalls[0]["function"]));
+  assert.equal(toolCalls[0]["function"]["name"], "weather");
 });
 
 test("rejects a model mismatch", async () => {
@@ -252,7 +272,7 @@ test("rejects a model mismatch", async () => {
   const response = await postJson(url, "/v1/responses", { model: OTHER_MODEL, input: "Hi" });
 
   // then
-  expect(response.status).toBe(HTTP_NOT_FOUND_STATUS);
+  assert.equal(response.status, HTTP_NOT_FOUND_STATUS);
 });
 
 test("rejects malformed model path encoding as a client error", async () => {
@@ -264,8 +284,8 @@ test("rejects malformed model path encoding as a client error", async () => {
   const body = await responseJson(response);
 
   // then
-  expect(response.status).toBe(HTTP_BAD_REQUEST_STATUS);
-  expect(body).toMatchObject({ error: { code: "invalid_model" } });
+  assert.equal(response.status, HTTP_BAD_REQUEST_STATUS);
+  assertErrorCode(body, "invalid_model");
 });
 
 test("replaces an unsafe client request ID", async () => {
@@ -279,7 +299,7 @@ test("replaces an unsafe client request ID", async () => {
   });
 
   // then
-  expect(response.headers.get("x-request-id")).toMatch(/^req_[a-f0-9]+$/);
+  assert.match(response.headers.get("x-request-id") ?? "", /^req_[a-f0-9]+$/);
 });
 
 test("rejects unsupported media", async () => {
@@ -293,21 +313,23 @@ test("rejects unsupported media", async () => {
   });
 
   // then
-  expect(response.status).toBe(HTTP_BAD_REQUEST_STATUS);
+  assert.equal(response.status, HTTP_BAD_REQUEST_STATUS);
 });
 
-test.each([null, [], "text", 1])("rejects a non-object JSON body: %j", async (requestBody) => {
-  // given
-  const { url } = await fixture(textResult("Hello"));
+for (const requestBody of [null, [], "text", 1]) {
+  test(`rejects a non-object JSON body: ${JSON.stringify(requestBody)}`, async () => {
+    // given
+    const { url } = await fixture(textResult("Hello"));
 
-  // when
-  const response = await postJson(url, "/v1/responses", requestBody);
-  const body = await responseJson(response);
+    // when
+    const response = await postJson(url, "/v1/responses", requestBody);
+    const body = await responseJson(response);
 
-  // then
-  expect(response.status).toBe(HTTP_BAD_REQUEST_STATUS);
-  expect(body).toMatchObject({ error: { code: "invalid_json" } });
-});
+    // then
+    assert.equal(response.status, HTTP_BAD_REQUEST_STATUS);
+    assertErrorCode(body, "invalid_json");
+  });
+}
 
 test("rejects malformed JSON", async () => {
   // given
@@ -319,48 +341,36 @@ test("rejects malformed JSON", async () => {
   const body = await responseJson(response);
 
   // then
-  expect(response.status).toBe(HTTP_BAD_REQUEST_STATUS);
-  expect(body).toMatchObject({ error: { code: "invalid_json" } });
+  assert.equal(response.status, HTTP_BAD_REQUEST_STATUS);
+  assertErrorCode(body, "invalid_json");
 });
 
-test("rejects streaming through a public quick tunnel", async () => {
+test("limits gateway concurrency to one request", async () => {
   // given
-  const { url } = await fixture(textResult("Hello"), { quickTunnel: true });
+  let backendStarted: () => void = () => undefined;
+  let releaseBackend: () => void = () => undefined;
+  const didBackendStart = new Promise<void>((resolveStarted) => {
+    backendStarted = resolveStarted;
+  });
+  const run = async (): Promise<unknown> => {
+    backendStarted();
+    await new Promise<void>((resolveRun) => {
+      releaseBackend = resolveRun;
+    });
+    return textResult("Hello");
+  };
+  const { url } = await fixture(textResult("unused"), { run });
 
   // when
-  const response = await postJson(
-    url,
-    "/v1/responses",
-    { model: MODEL, input: "Hi", stream: true },
-    { "cf-ray": "test" },
-  );
+  const firstResponsePromise = postJson(url, "/v1/responses", { model: MODEL, input: "First" });
+  await didBackendStart;
+  const secondResponse = await postJson(url, "/v1/responses", { model: MODEL, input: "Second" });
+  releaseBackend();
+  const firstResponse = await firstResponsePromise;
 
   // then
-  expect(response.status).toBe(HTTP_BAD_REQUEST_STATUS);
-});
-
-test("rejects a non-positive gateway concurrency limit", () => {
-  // given
-  const configuration = baseConfiguration();
-  configuration.maxConcurrency = 0;
-
-  // when
-  const createInvalidGateway = (): Server => createGateway(configuration);
-
-  // then
-  expect(createInvalidGateway).toThrow("maxConcurrency must be a positive safe integer");
-});
-
-test("rejects an empty gateway token", () => {
-  // given
-  const configuration = baseConfiguration();
-  configuration.token = "";
-
-  // when
-  const createInvalidGateway = (): Server => createGateway(configuration);
-
-  // then
-  expect(createInvalidGateway).toThrow("token must be a non-empty string");
+  assert.equal(firstResponse.status, HTTP_OK_STATUS);
+  assert.equal(secondResponse.status, HTTP_TOO_MANY_REQUESTS_STATUS);
 });
 
 test("fails closed when OpenCode returns a different function", async () => {
@@ -382,15 +392,16 @@ test("fails closed when OpenCode returns a different function", async () => {
   });
 
   // then
-  expect(response.status).toBe(HTTP_BAD_GATEWAY_STATUS);
+  assert.equal(response.status, HTTP_BAD_GATEWAY_STATUS);
 });
 
 async function fixture(result: unknown, options: FixtureOptions = {}): Promise<GatewayFixture> {
   const calls: OpenCodeRequestBody[] = [];
   const backend: GatewayBackend = {
     toolIds: TOOL_IDS,
-    async run(body): Promise<unknown> {
+    async run(body, signal): Promise<unknown> {
       calls.push(body);
+      if (options.run) return options.run(body, signal);
       return result;
     },
   };
@@ -401,20 +412,10 @@ async function fixture(result: unknown, options: FixtureOptions = {}): Promise<G
     logger: { info: () => undefined },
   };
   if (options.upstreamModel) configuration.upstreamModel = options.upstreamModel;
-  if (options.quickTunnel !== undefined) configuration.quickTunnel = options.quickTunnel;
   const server = createGateway(configuration);
   const port = await listen(server);
   servers.push(server);
   return { calls, url: `http://${LOCALHOST}:${port}` };
-}
-
-function baseConfiguration(): GatewayConfiguration {
-  return {
-    model: MODEL,
-    token: API_TOKEN,
-    backend: { async run(): Promise<unknown> { return textResult("Hello"); } },
-    logger: { info: () => undefined },
-  };
 }
 
 function textResult(text: string): unknown {
@@ -463,9 +464,16 @@ function postRaw(
   });
 }
 
-async function responseJson(response: Response): Promise<unknown> {
+async function responseJson(response: Response): Promise<UnknownRecord> {
   const body: unknown = await response.json();
+  if (!isRecord(body)) throw new Error("Test received a non-object JSON response");
   return body;
+}
+
+function assertErrorCode(body: UnknownRecord, expectedCode: string): void {
+  const error = body["error"];
+  assert.ok(isRecord(error));
+  assert.equal(error["code"], expectedCode);
 }
 
 function parseSseEvents(body: string): SseEvent[] {

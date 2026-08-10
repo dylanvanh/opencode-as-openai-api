@@ -9,7 +9,6 @@ The [Meat + Plannotator review workflow](https://github.com/dylanvanh/opencode-a
 - Node.js 20 or newer
 - OpenCode 1.18.4 or newer
 - A provider and model already configured in OpenCode
-- `cloudflared` only if you use `--tunnel quick`
 
 ## Start
 
@@ -43,15 +42,11 @@ This is focused compatibility, not full OpenAI API parity. Images, audio, files,
 --variant <id>                 Fixed OpenCode model variant
 --directory <path>             Use this OpenCode configuration directory
 --port <number>                Default: 8787; 0 selects a free port
---max-concurrency <number>     Default: 1
---tunnel quick                 Start a TryCloudflare tunnel
 --help
 --version
 ```
 
 Without `--directory`, OpenCode runs in a new empty temporary directory. This stops project files and instructions from entering API requests.
-
-TryCloudflare is for temporary tests. It does not support server-sent events, so public streaming requests return an error. Local streaming remains available.
 
 ## Test
 

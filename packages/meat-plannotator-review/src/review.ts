@@ -1,8 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import type { Stats } from "node:fs";
-import { lstat, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { createCommandSpawnError, runCommand } from "./_internal/run-command.js";
@@ -26,28 +25,12 @@ export interface ReviewOptions {
   readonly pullRequestUrl?: string;
 }
 
-export class MeatResultError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "MeatResultError";
-  }
-}
-
 export async function runReview(options: ReviewOptions): Promise<void> {
   const workflowAbortController = new AbortController();
-  let temporaryDirectory: string | undefined;
   let privateGateway: PrivateGatewayHandle | undefined;
-  let cleanupPromise: Promise<void> | undefined;
   let interruptedExitCode: number | undefined;
-  const cleanup = (): Promise<void> => {
-    if (cleanupPromise === undefined) {
-      cleanupPromise = cleanupReview(temporaryDirectory, privateGateway);
-    }
-
-    return cleanupPromise;
-  };
   const stopOnSignal = (signal: ShutdownSignal): void => {
-    interruptedExitCode = exitCodeForSignal(signal);
+    interruptedExitCode = signal === "SIGINT" ? SIGINT_EXIT_CODE : SIGTERM_EXIT_CODE;
     workflowAbortController.abort();
   };
   const stopOnSigint = (): void => stopOnSignal("SIGINT");
@@ -70,12 +53,9 @@ export async function runReview(options: ReviewOptions): Promise<void> {
       privateGateway.gatewayToken,
       workflowAbortController.signal,
     );
-    temporaryDirectory = await mkdtemp(join(tmpdir(), "meat-plannotator-review-"));
-    const patchPath = join(temporaryDirectory, "reading.diff");
-    await writeFile(patchPath, readingPatch);
-    const plannotatorArguments = ["review", "--patch-file", patchPath];
     console.error("Opening Plannotator...");
-    await runCommand("plannotator", plannotatorArguments, {
+    await runCommand("plannotator", ["review", "--patch-file", "-"], {
+      input: readingPatch,
       stdio: "inherit",
       signal: workflowAbortController.signal,
     });
@@ -83,7 +63,7 @@ export async function runReview(options: ReviewOptions): Promise<void> {
     if (interruptedExitCode === undefined) throw error;
     process.exitCode = interruptedExitCode;
   } finally {
-    await cleanup();
+    await privateGateway?.stop();
     if (interruptedExitCode !== undefined) process.exitCode = interruptedExitCode;
     process.off("SIGINT", stopOnSigint);
     process.off("SIGTERM", stopOnSigterm);
@@ -95,10 +75,10 @@ export function parseMeatResult(output: string): string {
   try {
     result = JSON.parse(output);
   } catch {
-    throw new MeatResultError("Meat returned invalid JSON");
+    throw new Error("Meat returned invalid JSON");
   }
   if (!isMeatResult(result)) {
-    throw new MeatResultError("Meat did not return smart_diff");
+    throw new Error("Meat did not return smart_diff");
   }
 
   return result.smart_diff;
@@ -157,23 +137,6 @@ function isMeatResult(value: unknown): value is { readonly smart_diff: string } 
     && !Array.isArray(value)
     && "smart_diff" in value
     && typeof value.smart_diff === "string";
-}
-
-async function cleanupReview(
-  temporaryDirectory: string | undefined,
-  privateGateway: PrivateGatewayHandle | undefined,
-): Promise<void> {
-  try {
-    if (temporaryDirectory !== undefined) {
-      await rm(temporaryDirectory, { recursive: true, force: true });
-    }
-  } finally {
-    await privateGateway?.stop();
-  }
-}
-
-function exitCodeForSignal(signal: ShutdownSignal): number {
-  return signal === "SIGINT" ? SIGINT_EXIT_CODE : SIGTERM_EXIT_CODE;
 }
 
 async function readUntrackedPatch(

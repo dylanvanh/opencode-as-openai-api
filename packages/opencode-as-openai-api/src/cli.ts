@@ -8,20 +8,14 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  createGateway,
-  type GatewayBackend,
-  type GatewayConfiguration,
-} from "./server.js";
+import { parseArgs } from "node:util";
+import { createGateway, type GatewayBackend } from "./server.js";
 import { splitModel, type OpenCodeRequestBody } from "./translate.js";
 
 const VERSION = "0.1.0";
 const DEFAULT_GATEWAY_PORT = 8_787;
 const MIN_GATEWAY_PORT = 0;
 const MAX_GATEWAY_PORT = 65_535;
-const DEFAULT_MAX_CONCURRENCY = 1;
-const MIN_CONCURRENCY = 1;
-const MAX_CONCURRENCY = Number.MAX_SAFE_INTEGER;
 const GENERATED_TOKEN_RANDOM_BYTES = 32;
 const BACKEND_START_ATTEMPTS = 100;
 const BACKEND_RETRY_DELAY_100_MS = 100;
@@ -29,8 +23,6 @@ const BACKEND_START_TIMEOUT_30_SECONDS_MS = 30_000;
 const BACKEND_CLEANUP_TIMEOUT_5_SECONDS_MS = 5_000;
 const CHILD_STOP_TIMEOUT_5_SECONDS_MS = 5_000;
 const NO_CONTENT_STATUS = 204;
-const TUNNEL_OUTPUT_MAX_CHARACTERS = 16_000;
-const TUNNEL_START_TIMEOUT_30_SECONDS_MS = 30_000;
 const MINIMUM_OPENCODE_VERSION = { major: 1, minor: 18, patch: 4 };
 const TERMINATION_SIGNALS: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
 const DENIED_PERMISSIONS = [
@@ -56,8 +48,6 @@ type UnknownRecord = Record<string, unknown>;
 export interface GatewayOptions {
   readonly model: string;
   readonly port: number;
-  readonly maxConcurrency: number;
-  readonly tunnel: "quick" | null;
   readonly variant?: string;
   readonly directory?: string;
 }
@@ -67,93 +57,36 @@ export type CliAction =
   | { readonly kind: "version" }
   | { readonly kind: "serve"; readonly options: GatewayOptions };
 
-interface MutableCliOptions {
-  port: number;
-  maxConcurrency: number;
-  tunnel: string | null;
-  model?: string;
-  variant?: string;
-  directory?: string;
-  help?: boolean;
-  version?: boolean;
-}
-
 export function parseCliArguments(argv: readonly string[]): CliAction {
-  const options: MutableCliOptions = {
-    port: DEFAULT_GATEWAY_PORT,
-    maxConcurrency: DEFAULT_MAX_CONCURRENCY,
-    tunnel: null,
-  };
-
-  let argumentIndex = 0;
-  while (argumentIndex < argv.length) {
-    const argument = argv[argumentIndex];
-    argumentIndex += 1;
-    if (argument === undefined) break;
-    if (argument === "--help") {
-      options.help = true;
-      continue;
-    }
-    if (argument === "--version") {
-      options.version = true;
-      continue;
-    }
-
-    const value = argv[argumentIndex];
-    if (!value || value.startsWith("--")) {
-      if (isValueOption(argument)) throw new Error(`${argument} requires a value`);
-      throw new Error(`unknown option: ${argument}`);
-    }
-    argumentIndex += 1;
-    switch (argument) {
-      case "--model":
-        options.model = value;
-        break;
-      case "--variant":
-        options.variant = value;
-        break;
-      case "--directory":
-        options.directory = value;
-        break;
-      case "--port":
-        options.port = Number(value);
-        break;
-      case "--max-concurrency":
-        options.maxConcurrency = Number(value);
-        break;
-      case "--tunnel":
-        options.tunnel = value;
-        break;
-      default:
-        throw new Error(`unknown option: ${argument}`);
-    }
-  }
-
-  if (options.help) return { kind: "help" };
-  if (options.version) return { kind: "version" };
-  const model = options.model;
+  const { values } = parseArgs({
+    args: [...argv],
+    options: {
+      model: { type: "string" },
+      variant: { type: "string" },
+      directory: { type: "string" },
+      port: { type: "string" },
+      help: { type: "boolean" },
+      version: { type: "boolean" },
+    },
+    allowPositionals: false,
+    strict: true,
+  });
+  if (values.help) return { kind: "help" };
+  if (values.version) return { kind: "version" };
+  const model = values.model;
   if (!model) throw new Error("--model is required");
   splitModel(model);
-  if (!Number.isInteger(options.port) || options.port < MIN_GATEWAY_PORT || options.port > MAX_GATEWAY_PORT) {
+  const port = Number(values.port ?? DEFAULT_GATEWAY_PORT);
+  if (!Number.isInteger(port) || port < MIN_GATEWAY_PORT || port > MAX_GATEWAY_PORT) {
     throw new Error(`--port must be from ${MIN_GATEWAY_PORT} to ${MAX_GATEWAY_PORT}`);
   }
-  if (
-    !Number.isSafeInteger(options.maxConcurrency)
-    || options.maxConcurrency < MIN_CONCURRENCY
-    || options.maxConcurrency > MAX_CONCURRENCY
-  ) {
-    throw new Error("--max-concurrency must be a positive integer");
-  }
-  if (options.tunnel !== null && options.tunnel !== "quick") throw new Error("--tunnel only supports quick");
   return {
     kind: "serve",
     options: {
       model,
-      port: options.port,
-      maxConcurrency: options.maxConcurrency,
-      tunnel: options.tunnel,
-      ...(options.variant === undefined ? {} : { variant: options.variant }),
-      ...(options.directory === undefined ? {} : { directory: resolve(options.directory) }),
+      port,
+      ...(values.variant === undefined ? {} : { variant: values.variant }),
+      ...(values.directory === undefined ? {} : { directory: resolve(values.directory) }),
     },
   };
 }
@@ -174,16 +107,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   let temporaryDirectory: string | undefined;
   let openCodeChild: ChildProcess | undefined;
   let gateway: Server | undefined;
-  let tunnel: ChildProcess | undefined;
   let cleanupPromise: Promise<void> | undefined;
   let isGatewayReady = false;
   const cleanup = (): Promise<void> => {
     if (cleanupPromise) return cleanupPromise;
     cleanupPromise = (async () => {
-      await Promise.all([
-        ...(openCodeChild ? [stopChildProcess(openCodeChild)] : []),
-        ...(tunnel ? [stopChildProcess(tunnel)] : []),
-      ]);
+      if (openCodeChild) await stopChildProcess(openCodeChild);
       const runningGateway = gateway;
       if (runningGateway?.listening) {
         await new Promise<void>((resolveClose) => runningGateway.close(() => resolveClose()));
@@ -244,36 +173,21 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     isGatewayReady = true;
     const token = process.env["OPENCODE_API_TOKEN"]
       || `oca_${randomBytes(GENERATED_TOKEN_RANDOM_BYTES).toString("hex")}`;
-    const gatewayConfiguration: GatewayConfiguration = {
+    gateway = createGateway({
       model: process.env["OPENCODE_API_MODEL"] || selectedModel,
       upstreamModel: selectedModel,
       token,
       backend,
-      maxConcurrency: options.maxConcurrency,
-      quickTunnel: options.tunnel === "quick",
-    };
-    if (options.variant) gatewayConfiguration.variant = options.variant;
-    gateway = createGateway(gatewayConfiguration);
+      ...(options.variant === undefined ? {} : { variant: options.variant }),
+    });
 
     const gatewayPort = await listen(gateway, options.port);
     const localUrl = `http://127.0.0.1:${gatewayPort}/v1`;
     console.log(`Ready\nOpenCode: ${openCodeVersion}\nModel: ${selectedModel}\nBase URL: ${localUrl}\nAPI token: ${token}`);
     console.log(`\nClient configuration:\nOPENAI_BASE_URL=${localUrl}\nOPENAI_API_KEY=${token}`);
-    if (options.tunnel === "quick") {
-      const quickTunnel = startQuickTunnel(`http://127.0.0.1:${gatewayPort}`);
-      tunnel = quickTunnel.child;
-      console.log(`\nPublic URL: ${await quickTunnel.url}/v1\nPublic streaming: unavailable`);
-    }
   } catch (error: unknown) {
     await cleanup();
     throw error;
-  }
-}
-
-class OpenCodeProtocolError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "OpenCodeProtocolError";
   }
 }
 
@@ -345,11 +259,7 @@ class OpenCodeHttpBackend implements GatewayBackend {
 }
 
 function usage(): string {
-  return `opencode-as-openai-api ${VERSION}\n\nUsage:\n  opencode-as-openai-api --model <provider/model> [options]\n\nOptions:\n  --model <provider/model>    Model exposed by the gateway\n  --variant <id>              Fixed OpenCode model variant\n  --directory <path>          OpenCode configuration directory\n  --port <number>             Gateway port (default: ${DEFAULT_GATEWAY_PORT}; 0 selects a free port)\n  --max-concurrency <number>  Concurrent requests (default: ${DEFAULT_MAX_CONCURRENCY})\n  --tunnel quick              Start a TryCloudflare tunnel\n  --help                      Show help\n  --version                   Show version`;
-}
-
-function isValueOption(argument: string): boolean {
-  return ["--model", "--variant", "--directory", "--port", "--max-concurrency", "--tunnel"].includes(argument);
+  return `opencode-as-openai-api ${VERSION}\n\nUsage:\n  opencode-as-openai-api --model <provider/model> [options]\n\nOptions:\n  --model <provider/model>    Model exposed by the gateway\n  --variant <id>              Fixed OpenCode model variant\n  --directory <path>          OpenCode configuration directory\n  --port <number>             Gateway port (default: ${DEFAULT_GATEWAY_PORT}; 0 selects a free port)\n  --help                      Show help\n  --version                   Show version`;
 }
 
 async function validateOpenCodeDirectory(directory: string): Promise<void> {
@@ -414,61 +324,30 @@ function selectFreeTcpPort(): Promise<number> {
 }
 
 function toolIdsFrom(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.map((tool, index) => {
-      if (typeof tool === "string" && tool) return tool;
-      if (isRecord(tool) && typeof tool["id"] === "string" && tool["id"]) return tool["id"];
-      throw new OpenCodeProtocolError(`OpenCode returned an invalid tool identifier at index ${index}`);
-    });
-  }
-  if (isRecord(value)) return Object.keys(value);
-  throw new OpenCodeProtocolError("OpenCode returned invalid tool identifiers");
+  if (!Array.isArray(value)) throw new Error("OpenCode returned invalid tool identifiers");
+  return value.map((toolId, index) => {
+    if (typeof toolId === "string" && toolId) return toolId;
+    throw new Error(`OpenCode returned an invalid tool identifier at index ${index}`);
+  });
 }
 
 function sessionIdFrom(value: unknown): string {
-  if (!isRecord(value)) throw new OpenCodeProtocolError("OpenCode did not create a session");
-  const directId = value["id"];
-  if (typeof directId === "string" && directId) return directId;
-  const data = value["data"];
-  if (isRecord(data) && typeof data["id"] === "string" && data["id"]) return data["id"];
-  throw new OpenCodeProtocolError("OpenCode did not create a session");
+  if (isRecord(value) && typeof value["id"] === "string" && value["id"]) return value["id"];
+  throw new Error("OpenCode did not create a session");
 }
 
 function hasModel(value: unknown, selectedModel: string): boolean {
   const { providerID, modelID } = splitModel(selectedModel);
-  const root = isRecord(value) ? value["providers"] ?? value : value;
-  const provider = providerFrom(root, providerID);
-  if (!provider) return false;
-  const models = provider["models"];
-  if (models === undefined) return false;
-  if (Array.isArray(models)) {
-    return models.some((model, index) => modelMatches(model, modelID, index));
+  if (!isRecord(value) || !Array.isArray(value["providers"])) {
+    throw new Error("OpenCode returned invalid provider configuration");
   }
-  if (isRecord(models)) return Object.hasOwn(models, modelID);
-  throw new OpenCodeProtocolError("OpenCode returned invalid model configuration");
-}
-
-function providerFrom(value: unknown, providerId: string): UnknownRecord | undefined {
-  if (Array.isArray(value)) {
-    for (const [index, provider] of value.entries()) {
-      if (!isRecord(provider)) {
-        throw new OpenCodeProtocolError(`OpenCode returned an invalid provider at index ${index}`);
-      }
-      if (provider["id"] === providerId || provider["providerID"] === providerId) return provider;
+  for (const [index, provider] of value["providers"].entries()) {
+    if (!isRecord(provider) || typeof provider["id"] !== "string" || !isRecord(provider["models"])) {
+      throw new Error(`OpenCode returned an invalid provider at index ${index}`);
     }
-    return undefined;
+    if (provider["id"] === providerID) return Object.hasOwn(provider["models"], modelID);
   }
-  if (!isRecord(value)) throw new OpenCodeProtocolError("OpenCode returned invalid provider configuration");
-  const provider = value[providerId];
-  if (provider === undefined) return undefined;
-  if (isRecord(provider)) return provider;
-  throw new OpenCodeProtocolError(`OpenCode returned an invalid provider: ${providerId}`);
-}
-
-function modelMatches(value: unknown, modelId: string, index: number): boolean {
-  if (typeof value === "string") return value === modelId;
-  if (isRecord(value)) return value["id"] === modelId || value["modelID"] === modelId;
-  throw new OpenCodeProtocolError(`OpenCode returned an invalid model at index ${index}`);
+  return false;
 }
 
 async function waitForBackend(backend: OpenCodeHttpBackend, model: string, child: ChildProcess): Promise<void> {
@@ -496,54 +375,6 @@ async function waitForBackend(backend: OpenCodeHttpBackend, model: string, child
   }
   if (lastError != null) throw lastError;
   throw new Error("OpenCode did not start");
-}
-
-function startQuickTunnel(localUrl: string): { child: ChildProcess; url: Promise<string> } {
-  const child = spawn("cloudflared", ["tunnel", "--url", localUrl], { stdio: ["ignore", "pipe", "pipe"] });
-  const url = new Promise<string>((resolveUrl, reject) => {
-    let output = "";
-    let hasSettled = false;
-    let startupTimeout: NodeJS.Timeout;
-    const removeStartupListeners = (): void => {
-      clearTimeout(startupTimeout);
-      child.stdout?.off("data", inspect);
-      child.stderr?.off("data", inspect);
-      child.off("error", handleError);
-      child.off("exit", handleExit);
-    };
-    const fail = (error: Error): void => {
-      if (hasSettled) return;
-      hasSettled = true;
-      removeStartupListeners();
-      reject(error);
-    };
-    const inspect = (chunk: unknown): void => {
-      const chunkText = Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk);
-      output = (output + chunkText).slice(-TUNNEL_OUTPUT_MAX_CHARACTERS);
-      const tunnelUrl = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i)?.[0];
-      if (!tunnelUrl || hasSettled) return;
-      hasSettled = true;
-      removeStartupListeners();
-      child.stdout?.resume();
-      child.stderr?.resume();
-      resolveUrl(tunnelUrl);
-    };
-    const handleError = (error: Error): void => {
-      fail(errorCode(error) === "ENOENT" ? new Error("cloudflared is not installed or is not in PATH") : error);
-    };
-    const handleExit = (exitCode: number | null): void => {
-      fail(new Error(`cloudflared exited with code ${exitCode}`));
-    };
-    child.stdout?.on("data", inspect);
-    child.stderr?.on("data", inspect);
-    child.once("error", handleError);
-    child.once("exit", handleExit);
-    startupTimeout = setTimeout(
-      () => fail(new Error("cloudflared startup timed out")),
-      TUNNEL_START_TIMEOUT_30_SECONDS_MS,
-    );
-  });
-  return { child, url };
 }
 
 async function listen(server: Server, port: number): Promise<number> {

@@ -1,9 +1,10 @@
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
-import { MeatResultError, parseMeatResult, readLocalBranchPatch } from "../src/review.js";
+import { test } from "node:test";
+import { parseMeatResult, readLocalBranchPatch } from "../src/review.js";
 
 const BASE_BRANCH = "main";
 const TRACKED_FILE_NAME = "tracked.txt";
@@ -27,7 +28,7 @@ test("should extract the Meat reading diff", () => {
   const patch = parseMeatResult(output);
 
   // then
-  expect(patch).toBe(EXPECTED_PATCH);
+  assert.equal(patch, EXPECTED_PATCH);
 });
 
 test("should reject invalid Meat JSON", () => {
@@ -38,19 +39,21 @@ test("should reject invalid Meat JSON", () => {
   const parseResult = (): string => parseMeatResult(output);
 
   // then
-  expect(parseResult).toThrowError(new MeatResultError("Meat returned invalid JSON"));
+  assert.throws(parseResult, new Error("Meat returned invalid JSON"));
 });
 
-test.each(MALFORMED_MEAT_RESULTS)("should reject a malformed Meat result with $shape", ({ output }) => {
-  // given
-  const meatOutput = output;
+for (const malformedResult of MALFORMED_MEAT_RESULTS) {
+  test(`should reject a malformed Meat result with ${malformedResult.shape}`, () => {
+    // given
+    const meatOutput = malformedResult.output;
 
-  // when
-  const parseResult = (): string => parseMeatResult(meatOutput);
+    // when
+    const parseResult = (): string => parseMeatResult(meatOutput);
 
-  // then
-  expect(parseResult).toThrowError(new MeatResultError("Meat did not return smart_diff"));
-});
+    // then
+    assert.throws(parseResult, new Error("Meat did not return smart_diff"));
+  });
+}
 
 test("should include changes committed after the base branch", async () => {
   // given
@@ -65,8 +68,8 @@ test("should include changes committed after the base branch", async () => {
     const patch = await readLocalBranchPatch(BASE_BRANCH, repository);
 
     // then
-    expect(patch).toContain(`diff --git a/${TRACKED_FILE_NAME} b/${TRACKED_FILE_NAME}`);
-    expect(patch).toContain(`+${UPDATED_CONTENT.trim()}`);
+    assert.match(patch, new RegExp(`diff --git a/${TRACKED_FILE_NAME} b/${TRACKED_FILE_NAME}`));
+    assert.ok(patch.includes(`+${UPDATED_CONTENT.trim()}`));
   } finally {
     await rm(repository, { recursive: true, force: true });
   }
@@ -83,8 +86,8 @@ test("should include staged changes", async () => {
     const patch = await readLocalBranchPatch(BASE_BRANCH, repository);
 
     // then
-    expect(patch).toContain(`diff --git a/${TRACKED_FILE_NAME} b/${TRACKED_FILE_NAME}`);
-    expect(patch).toContain(`+${UPDATED_CONTENT.trim()}`);
+    assert.match(patch, new RegExp(`diff --git a/${TRACKED_FILE_NAME} b/${TRACKED_FILE_NAME}`));
+    assert.ok(patch.includes(`+${UPDATED_CONTENT.trim()}`));
   } finally {
     await rm(repository, { recursive: true, force: true });
   }
@@ -100,8 +103,8 @@ test("should include unstaged changes", async () => {
     const patch = await readLocalBranchPatch(BASE_BRANCH, repository);
 
     // then
-    expect(patch).toContain(`diff --git a/${TRACKED_FILE_NAME} b/${TRACKED_FILE_NAME}`);
-    expect(patch).toContain(`+${UPDATED_CONTENT.trim()}`);
+    assert.match(patch, new RegExp(`diff --git a/${TRACKED_FILE_NAME} b/${TRACKED_FILE_NAME}`));
+    assert.ok(patch.includes(`+${UPDATED_CONTENT.trim()}`));
   } finally {
     await rm(repository, { recursive: true, force: true });
   }
@@ -117,8 +120,8 @@ test("should include untracked files", async () => {
     const patch = await readLocalBranchPatch(BASE_BRANCH, repository);
 
     // then
-    expect(patch).toContain(`diff --git a/${UNTRACKED_FILE_NAME} b/${UNTRACKED_FILE_NAME}`);
-    expect(patch).toContain(`+${UNTRACKED_CONTENT.trim()}`);
+    assert.match(patch, new RegExp(`diff --git a/${UNTRACKED_FILE_NAME} b/${UNTRACKED_FILE_NAME}`));
+    assert.ok(patch.includes(`+${UNTRACKED_CONTENT.trim()}`));
   } finally {
     await rm(repository, { recursive: true, force: true });
   }

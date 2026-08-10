@@ -8,10 +8,6 @@ GO_VERSION="1.25.1"
 BUN_VERSION="1.3.14"
 OPENCODE_VERSION="1.18.15"
 MEAT_VERSION="v0.0.0-20260803201634-f39f41dfe7b5"
-PLANNOTATOR_REPOSITORY="${PLANNOTATOR_REPOSITORY:-https://github.com/dylanvanh/plannotator.git}"
-PLANNOTATOR_REF="${PLANNOTATOR_REF:-bae103c7f5719c08a2261f0c5aadcdbae90a52cb}"
-SOURCE_REPOSITORY="${SOURCE_REPOSITORY:-https://github.com/dylanvanh/opencode-as-openai-api.git}"
-SOURCE_REF="${SOURCE_REF:-main}"
 INSTALL_PREFIX="${HOME}/.local"
 INSTALL_BIN="${INSTALL_PREFIX}/bin"
 WORK_DIRECTORY="$(mktemp -d)"
@@ -146,7 +142,7 @@ mkdir -p "$INSTALL_BIN"
 export PATH="${INSTALL_BIN}:${PATH}"
 
 echo "Installing OpenCode and opencode-as-openai-api..."
-git clone --depth 1 --branch "$SOURCE_REF" "$SOURCE_REPOSITORY" "${WORK_DIRECTORY}/source"
+git clone --depth 1 --branch main https://github.com/dylanvanh/opencode-as-openai-api.git "${WORK_DIRECTORY}/source"
 npm --prefix "${WORK_DIRECTORY}/source" ci --ignore-scripts --include=dev
 npm --prefix "${WORK_DIRECTORY}/source" run build --workspaces --if-present
 gateway_tarball="$(npm pack --ignore-scripts --silent --pack-destination "$WORK_DIRECTORY" "${WORK_DIRECTORY}/source/packages/opencode-as-openai-api")"
@@ -160,8 +156,8 @@ echo "Installing Meat..."
 GOBIN="$INSTALL_BIN" go install "meat.dev/cmd/meat@${MEAT_VERSION}"
 
 echo "Building the Plannotator fork..."
-git clone --depth 1 "$PLANNOTATOR_REPOSITORY" "${WORK_DIRECTORY}/plannotator"
-git -C "${WORK_DIRECTORY}/plannotator" fetch --depth 1 origin "$PLANNOTATOR_REF"
+git clone --depth 1 https://github.com/dylanvanh/plannotator.git "${WORK_DIRECTORY}/plannotator"
+git -C "${WORK_DIRECTORY}/plannotator" fetch --depth 1 origin bae103c7f5719c08a2261f0c5aadcdbae90a52cb
 git -C "${WORK_DIRECTORY}/plannotator" checkout --detach FETCH_HEAD
 (
   cd "${WORK_DIRECTORY}/plannotator"

@@ -1,9 +1,5 @@
 $ErrorActionPreference = "Stop"
 
-$PlannotatorRepository = if ($env:PLANNOTATOR_REPOSITORY) { $env:PLANNOTATOR_REPOSITORY } else { "https://github.com/dylanvanh/plannotator.git" }
-$PlannotatorRef = if ($env:PLANNOTATOR_REF) { $env:PLANNOTATOR_REF } else { "bae103c7f5719c08a2261f0c5aadcdbae90a52cb" }
-$SourceRepository = if ($env:SOURCE_REPOSITORY) { $env:SOURCE_REPOSITORY } else { "https://github.com/dylanvanh/opencode-as-openai-api.git" }
-$SourceRef = if ($env:SOURCE_REF) { $env:SOURCE_REF } else { "main" }
 $OpenCodeVersion = "1.18.15"
 $MeatVersion = "v0.0.0-20260803201634-f39f41dfe7b5"
 $MinimumNodeVersion = [version]"22.12.0"
@@ -80,7 +76,7 @@ New-Item -ItemType Directory -Force -Path $WorkDirectory | Out-Null
 try {
     Write-Host "Installing OpenCode and opencode-as-openai-api..."
     $sourceDirectory = Join-Path $WorkDirectory "source"
-    & git clone --depth 1 --branch $SourceRef $SourceRepository $sourceDirectory
+    & git clone --depth 1 --branch main "https://github.com/dylanvanh/opencode-as-openai-api.git" $sourceDirectory
     if ($LASTEXITCODE -ne 0) { throw "Source clone failed" }
     & npm --prefix $sourceDirectory ci --ignore-scripts --include=dev
     if ($LASTEXITCODE -ne 0) { throw "Source dependency installation failed" }
@@ -105,9 +101,9 @@ try {
 
     Write-Host "Building the Plannotator fork..."
     $plannotatorDirectory = Join-Path $WorkDirectory "plannotator"
-    & git clone --depth 1 $PlannotatorRepository $plannotatorDirectory
+    & git clone --depth 1 "https://github.com/dylanvanh/plannotator.git" $plannotatorDirectory
     if ($LASTEXITCODE -ne 0) { throw "Plannotator clone failed" }
-    & git -C $plannotatorDirectory fetch --depth 1 origin $PlannotatorRef
+    & git -C $plannotatorDirectory fetch --depth 1 origin "bae103c7f5719c08a2261f0c5aadcdbae90a52cb"
     if ($LASTEXITCODE -ne 0) { throw "Plannotator ref fetch failed" }
     & git -C $plannotatorDirectory checkout --detach FETCH_HEAD
     if ($LASTEXITCODE -ne 0) { throw "Plannotator checkout failed" }
