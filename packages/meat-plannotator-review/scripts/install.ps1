@@ -2,11 +2,12 @@ $ErrorActionPreference = "Stop"
 
 $PlannotatorRepository = if ($env:PLANNOTATOR_REPOSITORY) { $env:PLANNOTATOR_REPOSITORY } else { "https://github.com/dylanvanh/plannotator.git" }
 $PlannotatorRef = if ($env:PLANNOTATOR_REF) { $env:PLANNOTATOR_REF } else { "bae103c7f5719c08a2261f0c5aadcdbae90a52cb" }
-$GatewayPackage = if ($env:GATEWAY_PACKAGE) { $env:GATEWAY_PACKAGE } else { "git+https://github.com/dylanvanh/opencode-as-openai-api.git#720e15e103d5c9cc87b0c477491b54fd8868e01d" }
+$SourceRepository = if ($env:SOURCE_REPOSITORY) { $env:SOURCE_REPOSITORY } else { "https://github.com/dylanvanh/opencode-as-openai-api.git" }
+$SourceRef = if ($env:SOURCE_REF) { $env:SOURCE_REF } else { "main" }
 $OpenCodeVersion = "1.18.15"
 $MeatVersion = "v0.0.0-20260803201634-f39f41dfe7b5"
-$InstallPrefix = Join-Path $env:LOCALAPPDATA "Programs\opencode-meat-review"
-$WorkDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("opencode-meat-review-" + [guid]::NewGuid())
+$InstallPrefix = Join-Path $env:LOCALAPPDATA "Programs\meat-plannotator-review"
+$WorkDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("meat-plannotator-review-" + [guid]::NewGuid())
 
 function Refresh-Path {
     $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
@@ -65,7 +66,20 @@ New-Item -ItemType Directory -Force -Path $InstallPrefix | Out-Null
 $env:Path = "$InstallPrefix;$env:Path"
 
 Write-Host "Installing OpenCode and opencode-as-openai-api..."
-& npm install --global --prefix $InstallPrefix "opencode-ai@$OpenCodeVersion" $GatewayPackage
+New-Item -ItemType Directory -Force -Path $WorkDirectory | Out-Null
+$sourceDirectory = Join-Path $WorkDirectory "source"
+& git clone --depth 1 --branch $SourceRef $SourceRepository $sourceDirectory
+if ($LASTEXITCODE -ne 0) { throw "Source clone failed" }
+$gatewaySourceDirectory = Join-Path $sourceDirectory "packages/opencode-as-openai-api"
+$gatewayTarballName = (& npm pack --silent --pack-destination $WorkDirectory $gatewaySourceDirectory | Select-Object -Last 1).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Gateway package build failed" }
+$reviewSourceDirectory = Join-Path $sourceDirectory "packages/meat-plannotator-review"
+$reviewTarballName = (& npm pack --silent --pack-destination $WorkDirectory $reviewSourceDirectory | Select-Object -Last 1).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Review package build failed" }
+& npm install --global --prefix $InstallPrefix `
+    "opencode-ai@$OpenCodeVersion" `
+    (Join-Path $WorkDirectory $gatewayTarballName) `
+    (Join-Path $WorkDirectory $reviewTarballName)
 if ($LASTEXITCODE -ne 0) { throw "npm installation failed" }
 
 Write-Host "Installing Meat..."
@@ -107,7 +121,7 @@ if ($pathEntries -notcontains $InstallPrefix) {
 }
 
 Write-Host ""
-Write-Host "Installed: opencode, meat, plannotator, and opencode-as-openai-api"
+Write-Host "Installed: opencode, meat, plannotator, opencode-as-openai-api, and meat-plannotator-review"
 Write-Host "Open a new terminal, configure an OpenCode provider, then run:"
-Write-Host "  opencode-as-openai-api review --model provider/model"
-Write-Host "  opencode-as-openai-api review https://github.com/owner/repo/pull/123 --model provider/model"
+Write-Host "  meat-plannotator-review --model provider/model"
+Write-Host "  meat-plannotator-review https://github.com/owner/repo/pull/123 --model provider/model"

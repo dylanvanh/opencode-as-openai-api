@@ -1,0 +1,30 @@
+{
+  "name": "meat-plannotator-review",
+  "version": "0.1.0",
+  "description": "Review Git diffs with Meat and Plannotator through an OpenCode model.",
+  "type": "module",
+  "bin": {
+    "meat-plannotator-review": "src/cli.js"
+  },
+  "files": [
+    "src",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/cli.js && node --check src/review.js && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "meat",
+    "plannotator",
+    "opencode",
+    "code-review"
+  ],
+  "license": "MIT"
+}

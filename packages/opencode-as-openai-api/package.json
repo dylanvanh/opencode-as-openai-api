@@ -1,0 +1,29 @@
+{
+  "name": "opencode-as-openai-api",
+  "version": "0.1.0",
+  "description": "Expose any OpenCode model through an OpenAI-compatible API.",
+  "type": "module",
+  "bin": {
+    "opencode-as-openai-api": "src/cli.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/cli.js && node --check src/server.js && node --check src/translate.js && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "opencode",
+    "openai",
+    "proxy",
+    "responses-api"
+  ],
+  "license": "MIT"
+}

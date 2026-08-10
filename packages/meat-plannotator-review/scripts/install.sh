@@ -9,7 +9,8 @@ OPENCODE_VERSION="1.18.15"
 MEAT_VERSION="v0.0.0-20260803201634-f39f41dfe7b5"
 PLANNOTATOR_REPOSITORY="${PLANNOTATOR_REPOSITORY:-https://github.com/dylanvanh/plannotator.git}"
 PLANNOTATOR_REF="${PLANNOTATOR_REF:-bae103c7f5719c08a2261f0c5aadcdbae90a52cb}"
-GATEWAY_PACKAGE="${GATEWAY_PACKAGE:-git+https://github.com/dylanvanh/opencode-as-openai-api.git#720e15e103d5c9cc87b0c477491b54fd8868e01d}"
+SOURCE_REPOSITORY="${SOURCE_REPOSITORY:-https://github.com/dylanvanh/opencode-as-openai-api.git}"
+SOURCE_REF="${SOURCE_REF:-main}"
 INSTALL_PREFIX="${HOME}/.local"
 INSTALL_BIN="${INSTALL_PREFIX}/bin"
 WORK_DIRECTORY="$(mktemp -d)"
@@ -91,7 +92,7 @@ install_go() {
     *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
   esac
 
-  go_root="${INSTALL_PREFIX}/share/opencode-meat-review/go"
+  go_root="${INSTALL_PREFIX}/share/meat-plannotator-review/go"
   if [[ ! -x "${go_root}/bin/go" ]] || ! "${go_root}/bin/go" version | grep -Fq "go${GO_VERSION}"; then
     mkdir -p "$(dirname "$go_root")"
     curl -fsSL "https://go.dev/dl/go${GO_VERSION}.${go_os}-${go_arch}.tar.gz" -o "${WORK_DIRECTORY}/go.tar.gz"
@@ -136,7 +137,13 @@ mkdir -p "$INSTALL_BIN"
 export PATH="${INSTALL_BIN}:${PATH}"
 
 echo "Installing OpenCode and opencode-as-openai-api..."
-npm install --global --prefix "$INSTALL_PREFIX" "opencode-ai@${OPENCODE_VERSION}" "$GATEWAY_PACKAGE"
+git clone --depth 1 --branch "$SOURCE_REF" "$SOURCE_REPOSITORY" "${WORK_DIRECTORY}/source"
+gateway_tarball="$(npm pack --silent --pack-destination "$WORK_DIRECTORY" "${WORK_DIRECTORY}/source/packages/opencode-as-openai-api")"
+review_tarball="$(npm pack --silent --pack-destination "$WORK_DIRECTORY" "${WORK_DIRECTORY}/source/packages/meat-plannotator-review")"
+npm install --global --prefix "$INSTALL_PREFIX" \
+  "opencode-ai@${OPENCODE_VERSION}" \
+  "${WORK_DIRECTORY}/${gateway_tarball}" \
+  "${WORK_DIRECTORY}/${review_tarball}"
 
 echo "Installing Meat..."
 GOBIN="$INSTALL_BIN" go install "meat.dev/cmd/meat@${MEAT_VERSION}"
@@ -156,7 +163,7 @@ git -C "${WORK_DIRECTORY}/plannotator" checkout --detach FETCH_HEAD
 persist_path
 
 echo
-echo "Installed: opencode, meat, plannotator, and opencode-as-openai-api"
+echo "Installed: opencode, meat, plannotator, opencode-as-openai-api, and meat-plannotator-review"
 echo "Open a new terminal, configure an OpenCode provider, then run:"
-echo "  opencode-as-openai-api review --model provider/model"
-echo "  opencode-as-openai-api review https://github.com/owner/repo/pull/123 --model provider/model"
+echo "  meat-plannotator-review --model provider/model"
+echo "  meat-plannotator-review https://github.com/owner/repo/pull/123 --model provider/model"

@@ -7,32 +7,23 @@ import test from "node:test";
 import { parseArgs } from "../src/cli.js";
 import { parseMeatResult, readLocalBranchPatch } from "../src/review.js";
 
-test("parses the public CLI options", () => {
-  assert.deepEqual(parseArgs(["--model", "provider/model", "--port", "0", "--max-concurrency", "2", "--tunnel", "quick"]), {
-    model: "provider/model", port: 0, maxConcurrency: 2, tunnel: "quick",
-  });
-  assert.throws(() => parseArgs([]), /--model is required/);
-  assert.throws(() => parseArgs(["--model", "invalid"]), /provider\/model/);
-});
-
-test("parses local and GitHub PR review options", () => {
+test("should parse local and GitHub PR review options", () => {
   // given
   const localArgs = ["--model", "provider/model", "--base", "origin/trunk"];
   const prArgs = ["https://github.com/acme/repo/pull/12", "--model", "provider/model"];
 
   // when
-  const localOptions = parseArgs(localArgs, true);
-  const prOptions = parseArgs(prArgs, true);
+  const localOptions = parseArgs(localArgs);
+  const prOptions = parseArgs(prArgs);
 
   // then
   assert.equal(localOptions.base, "origin/trunk");
-  assert.equal(localOptions.port, 0);
   assert.equal(prOptions.prUrl, prArgs[0]);
-  assert.throws(() => parseArgs(["https://example.com/not-a-pr", "--model", "provider/model"], true), /GitHub PR URL/);
-  assert.throws(() => parseArgs([prArgs[0], "--model", "provider/model", "--base", "main"], true), /--base cannot/);
+  assert.throws(() => parseArgs(["https://example.com/not-a-pr", "--model", "provider/model"]), /GitHub PR URL/);
+  assert.throws(() => parseArgs([prArgs[0], "--model", "provider/model", "--base", "main"]), /--base cannot/);
 });
 
-test("extracts the Meat reading diff", () => {
+test("should extract the Meat reading diff", () => {
   // given
   const expectedPatch = "diff --git a/a.js b/a.js\n";
   const output = JSON.stringify({ smart_diff: expectedPatch });
@@ -45,9 +36,9 @@ test("extracts the Meat reading diff", () => {
   assert.throws(() => parseMeatResult("not json"), /invalid JSON/);
 });
 
-test("reads tracked and untracked changes since the base branch", async () => {
+test("should read tracked and untracked changes since the base branch", async () => {
   // given
-  const repository = await mkdtemp(join(tmpdir(), "opencode-review-test-"));
+  const repository = await mkdtemp(join(tmpdir(), "meat-plannotator-review-test-"));
   const trackedPath = join(repository, "tracked.txt");
   const untrackedPath = join(repository, "untracked.txt");
   try {

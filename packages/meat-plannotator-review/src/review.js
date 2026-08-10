@@ -2,12 +2,10 @@ import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { lstat, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 const GATEWAY_START_TIMEOUT_30_SECONDS_MS = 30_000;
 const GATEWAY_STOP_TIMEOUT_5_SECONDS_MS = 5_000;
-const cliPath = join(dirname(fileURLToPath(import.meta.url)), "cli.js");
 
 export async function runReview(options) {
   console.error(options.prUrl ? "Fetching the GitHub PR..." : "Reading changes since the base branch...");
@@ -29,7 +27,7 @@ export async function runReview(options) {
   try {
     console.error("Reducing the diff with Meat...");
     const readingPatch = await meatPatch(sourcePatch, gateway.model, gateway.baseUrl, gateway.token);
-    temporaryDirectory = await mkdtemp(join(tmpdir(), "opencode-meat-review-"));
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "meat-plannotator-review-"));
     const patchPath = join(temporaryDirectory, "reading.diff");
     await writeFile(patchPath, readingPatch);
     const args = ["review", "--patch-file", patchPath];
@@ -103,10 +101,10 @@ async function meatPatch(patch, model, baseUrl, token) {
 async function startGateway(options) {
   const token = `oca_${randomBytes(32).toString("hex")}`;
   const model = `opencode-gateway/${options.model}${options.variant ? `:${options.variant}` : ""}`;
-  const args = [cliPath, "--model", options.model, "--port", "0"];
+  const args = ["--model", options.model, "--port", "0"];
   if (options.variant) args.push("--variant", options.variant);
   if (options.directory) args.push("--directory", options.directory);
-  const child = spawn(process.execPath, args, {
+  const child = spawn("opencode-as-openai-api", args, {
     cwd: process.cwd(),
     env: { ...process.env, OPENCODE_API_MODEL: model, OPENCODE_API_TOKEN: token },
     stdio: ["ignore", "pipe", "inherit"],
@@ -127,7 +125,7 @@ async function startGateway(options) {
         child.stdout.resume();
         resolveBaseUrl(match[1]);
       };
-      child.once("error", fail);
+      child.once("error", (error) => fail(commandError("opencode-as-openai-api", error)));
       child.once("exit", (code) => fail(new Error(`Gateway exited with code ${code}`)));
       child.stdout.on("data", inspect);
     });
@@ -139,7 +137,7 @@ async function startGateway(options) {
 }
 
 function stopChild(child) {
-  if (child.exitCode != null) return Promise.resolve();
+  if (child.exitCode != null || child.pid == null) return Promise.resolve();
   if (process.platform === "win32") {
     return command("taskkill", ["/PID", String(child.pid), "/T", "/F"], { acceptedExitCodes: [0, 128] });
   }
