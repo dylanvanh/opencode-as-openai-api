@@ -6,6 +6,8 @@ $SourceRepository = if ($env:SOURCE_REPOSITORY) { $env:SOURCE_REPOSITORY } else 
 $SourceRef = if ($env:SOURCE_REF) { $env:SOURCE_REF } else { "main" }
 $OpenCodeVersion = "1.18.15"
 $MeatVersion = "v0.0.0-20260803201634-f39f41dfe7b5"
+$MinimumNodeVersion = [version]"22.12.0"
+$MinimumBunVersion = [version]"1.3.14"
 $InstallPrefix = Join-Path $env:LOCALAPPDATA "Programs\meat-plannotator-review"
 $WorkDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("meat-plannotator-review-" + [guid]::NewGuid())
 
@@ -15,12 +17,12 @@ function Refresh-Path {
     $env:Path = "$userPath;$machinePath"
 }
 
-function Install-WingetPackage([string]$Command, [string]$Package) {
-    if (Get-Command $Command -ErrorAction SilentlyContinue) { return }
-    winget install --id $Package --exact --accept-package-agreements --accept-source-agreements
+function Install-WingetPackage([string]$CommandName, [string]$PackageIdentifier) {
+    if (Get-Command $CommandName -ErrorAction SilentlyContinue) { return }
+    winget install --id $PackageIdentifier --exact --accept-package-agreements --accept-source-agreements
     Refresh-Path
-    if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) {
-        throw "$Command was installed but is not available in PATH. Open a new terminal and run the installer again."
+    if (-not (Get-Command $CommandName -ErrorAction SilentlyContinue)) {
+        throw "$CommandName was installed but is not available in PATH. Open a new terminal and run the installer again."
     }
 }
 
@@ -41,13 +43,22 @@ if ($LASTEXITCODE -ne 0) { throw "Your GitHub account cannot access dylanvanh/op
 & gh auth setup-git
 if ($LASTEXITCODE -ne 0) { throw "Git credential setup failed" }
 
-$nodeMajor = [int]((& node --version).TrimStart("v").Split(".")[0])
-if ($nodeMajor -lt 20) {
+$nodeVersion = [version]((& node --version).TrimStart("v"))
+if ($nodeVersion -lt $MinimumNodeVersion) {
     & winget upgrade --id "OpenJS.NodeJS.LTS" --exact --accept-package-agreements --accept-source-agreements
     if ($LASTEXITCODE -ne 0) { throw "Node.js upgrade failed" }
     Refresh-Path
-    $nodeMajor = [int]((& node --version).TrimStart("v").Split(".")[0])
-    if ($nodeMajor -lt 20) { throw "Node.js 20 or newer is required" }
+    $nodeVersion = [version]((& node --version).TrimStart("v"))
+    if ($nodeVersion -lt $MinimumNodeVersion) { throw "Node.js 22.12.0 or newer is required" }
+}
+
+$bunVersion = [version]((& bun --version).Trim())
+if ($bunVersion -lt $MinimumBunVersion) {
+    & winget upgrade --id "Oven-sh.Bun" --exact --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) { throw "Bun upgrade failed" }
+    Refresh-Path
+    $bunVersion = [version]((& bun --version).Trim())
+    if ($bunVersion -lt $MinimumBunVersion) { throw "Bun 1.3.14 or newer is required" }
 }
 
 $goVersionMatch = [regex]::Match((& go version), 'go(\d+\.\d+\.\d+)')
@@ -65,31 +76,34 @@ if ([version]$goVersionMatch.Groups[1].Value -lt [version]"1.24.13") {
 New-Item -ItemType Directory -Force -Path $InstallPrefix | Out-Null
 $env:Path = "$InstallPrefix;$env:Path"
 
-Write-Host "Installing OpenCode and opencode-as-openai-api..."
-New-Item -ItemType Directory -Force -Path $WorkDirectory | Out-Null
-$sourceDirectory = Join-Path $WorkDirectory "source"
-& git clone --depth 1 --branch $SourceRef $SourceRepository $sourceDirectory
-if ($LASTEXITCODE -ne 0) { throw "Source clone failed" }
-$gatewaySourceDirectory = Join-Path $sourceDirectory "packages/opencode-as-openai-api"
-$gatewayTarballName = (& npm pack --silent --pack-destination $WorkDirectory $gatewaySourceDirectory | Select-Object -Last 1).Trim()
-if ($LASTEXITCODE -ne 0) { throw "Gateway package build failed" }
-$reviewSourceDirectory = Join-Path $sourceDirectory "packages/meat-plannotator-review"
-$reviewTarballName = (& npm pack --silent --pack-destination $WorkDirectory $reviewSourceDirectory | Select-Object -Last 1).Trim()
-if ($LASTEXITCODE -ne 0) { throw "Review package build failed" }
-& npm install --global --prefix $InstallPrefix `
-    "opencode-ai@$OpenCodeVersion" `
-    (Join-Path $WorkDirectory $gatewayTarballName) `
-    (Join-Path $WorkDirectory $reviewTarballName)
-if ($LASTEXITCODE -ne 0) { throw "npm installation failed" }
-
-Write-Host "Installing Meat..."
-$env:GOBIN = $InstallPrefix
-& go install "meat.dev/cmd/meat@$MeatVersion"
-if ($LASTEXITCODE -ne 0) { throw "Meat installation failed" }
-
-Write-Host "Building the Plannotator fork..."
 New-Item -ItemType Directory -Force -Path $WorkDirectory | Out-Null
 try {
+    Write-Host "Installing OpenCode and opencode-as-openai-api..."
+    $sourceDirectory = Join-Path $WorkDirectory "source"
+    & git clone --depth 1 --branch $SourceRef $SourceRepository $sourceDirectory
+    if ($LASTEXITCODE -ne 0) { throw "Source clone failed" }
+    & npm --prefix $sourceDirectory ci --ignore-scripts --include=dev
+    if ($LASTEXITCODE -ne 0) { throw "Source dependency installation failed" }
+    & npm --prefix $sourceDirectory run build --workspaces --if-present
+    if ($LASTEXITCODE -ne 0) { throw "TypeScript build failed" }
+    $gatewaySourceDirectory = Join-Path $sourceDirectory "packages/opencode-as-openai-api"
+    $gatewayTarballName = (& npm pack --ignore-scripts --silent --pack-destination $WorkDirectory $gatewaySourceDirectory | Select-Object -Last 1).Trim()
+    if ($LASTEXITCODE -ne 0) { throw "Gateway package build failed" }
+    $reviewSourceDirectory = Join-Path $sourceDirectory "packages/meat-plannotator-review"
+    $reviewTarballName = (& npm pack --ignore-scripts --silent --pack-destination $WorkDirectory $reviewSourceDirectory | Select-Object -Last 1).Trim()
+    if ($LASTEXITCODE -ne 0) { throw "Review package build failed" }
+    & npm install --global --prefix $InstallPrefix `
+        "opencode-ai@$OpenCodeVersion" `
+        (Join-Path $WorkDirectory $gatewayTarballName) `
+        (Join-Path $WorkDirectory $reviewTarballName)
+    if ($LASTEXITCODE -ne 0) { throw "npm installation failed" }
+
+    Write-Host "Installing Meat..."
+    $env:GOBIN = $InstallPrefix
+    & go install "meat.dev/cmd/meat@$MeatVersion"
+    if ($LASTEXITCODE -ne 0) { throw "Meat installation failed" }
+
+    Write-Host "Building the Plannotator fork..."
     $plannotatorDirectory = Join-Path $WorkDirectory "plannotator"
     & git clone --depth 1 $PlannotatorRepository $plannotatorDirectory
     if ($LASTEXITCODE -ne 0) { throw "Plannotator clone failed" }

@@ -4,18 +4,21 @@
   "description": "Review Git diffs with Meat and Plannotator through an OpenCode model.",
   "type": "module",
   "bin": {
-    "meat-plannotator-review": "src/cli.js"
+    "meat-plannotator-review": "dist/cli.js"
   },
   "files": [
-    "src",
+    "dist",
     "scripts",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "start": "node src/cli.js",
-    "test": "node --test test/*.test.js",
-    "check": "node --check src/cli.js && node --check src/review.js && npm test"
+    "start": "npm run build && node dist/cli.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "npm run build && vitest run",
+    "check": "npm run typecheck && npm test",
+    "prepack": "npm run build"
   },
   "engines": {
     "node": ">=20"

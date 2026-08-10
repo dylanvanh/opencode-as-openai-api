@@ -2,6 +2,7 @@
 set -euo pipefail
 
 NODE_MAJOR="22"
+NODE_MINIMUM_VERSION="22.12.0"
 NVM_VERSION="v0.40.6"
 GO_VERSION="1.25.1"
 BUN_VERSION="1.3.14"
@@ -65,7 +66,14 @@ install_system_tools() {
 }
 
 install_node() {
-  if command -v node >/dev/null && node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'; then
+  if command -v node >/dev/null && node -e '
+    const current = process.versions.node.split(".").map(Number);
+    const minimum = process.argv[1].split(".").map(Number);
+    const supported = current[0] > minimum[0]
+      || (current[0] === minimum[0] && current[1] > minimum[1])
+      || (current[0] === minimum[0] && current[1] === minimum[1] && current[2] >= minimum[2]);
+    process.exit(supported ? 0 : 1);
+  ' "$NODE_MINIMUM_VERSION"; then
     return
   fi
 
@@ -103,10 +111,11 @@ install_go() {
 }
 
 install_bun() {
-  if ! command -v bun >/dev/null; then
-    curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
-    export PATH="${HOME}/.bun/bin:${PATH}"
+  if command -v bun >/dev/null && [[ "$(bun --version)" == "$BUN_VERSION" ]]; then
+    return
   fi
+  curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
+  export PATH="${HOME}/.bun/bin:${PATH}"
 }
 
 persist_path() {
@@ -138,8 +147,10 @@ export PATH="${INSTALL_BIN}:${PATH}"
 
 echo "Installing OpenCode and opencode-as-openai-api..."
 git clone --depth 1 --branch "$SOURCE_REF" "$SOURCE_REPOSITORY" "${WORK_DIRECTORY}/source"
-gateway_tarball="$(npm pack --silent --pack-destination "$WORK_DIRECTORY" "${WORK_DIRECTORY}/source/packages/opencode-as-openai-api")"
-review_tarball="$(npm pack --silent --pack-destination "$WORK_DIRECTORY" "${WORK_DIRECTORY}/source/packages/meat-plannotator-review")"
+npm --prefix "${WORK_DIRECTORY}/source" ci --ignore-scripts --include=dev
+npm --prefix "${WORK_DIRECTORY}/source" run build --workspaces --if-present
+gateway_tarball="$(npm pack --ignore-scripts --silent --pack-destination "$WORK_DIRECTORY" "${WORK_DIRECTORY}/source/packages/opencode-as-openai-api")"
+review_tarball="$(npm pack --ignore-scripts --silent --pack-destination "$WORK_DIRECTORY" "${WORK_DIRECTORY}/source/packages/meat-plannotator-review")"
 npm install --global --prefix "$INSTALL_PREFIX" \
   "opencode-ai@${OPENCODE_VERSION}" \
   "${WORK_DIRECTORY}/${gateway_tarball}" \

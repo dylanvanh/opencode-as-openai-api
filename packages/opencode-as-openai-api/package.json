@@ -4,17 +4,20 @@
   "description": "Expose any OpenCode model through an OpenAI-compatible API.",
   "type": "module",
   "bin": {
-    "opencode-as-openai-api": "src/cli.js"
+    "opencode-as-openai-api": "dist/cli.js"
   },
   "files": [
-    "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "start": "node src/cli.js",
-    "test": "node --test test/*.test.js",
-    "check": "node --check src/cli.js && node --check src/server.js && node --check src/translate.js && npm test"
+    "start": "npm run build && node dist/cli.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "npm run build && vitest run",
+    "check": "npm run typecheck && npm test",
+    "prepack": "npm run build"
   },
   "engines": {
     "node": ">=20"
