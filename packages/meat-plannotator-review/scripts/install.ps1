@@ -78,21 +78,33 @@ try {
     $sourceDirectory = Join-Path $WorkDirectory "source"
     & git clone --depth 1 --branch main "https://github.com/dylanvanh/opencode-as-openai-api.git" $sourceDirectory
     if ($LASTEXITCODE -ne 0) { throw "Source clone failed" }
-    & npm --prefix $sourceDirectory ci --ignore-scripts --include=dev
+    & bun install --cwd $sourceDirectory --frozen-lockfile --ignore-scripts
     if ($LASTEXITCODE -ne 0) { throw "Source dependency installation failed" }
-    & npm --prefix $sourceDirectory run build --workspaces --if-present
+    & bun run --cwd $sourceDirectory --workspaces --if-present build
     if ($LASTEXITCODE -ne 0) { throw "TypeScript build failed" }
     $gatewaySourceDirectory = Join-Path $sourceDirectory "packages/opencode-as-openai-api"
-    $gatewayTarballName = (& npm pack --ignore-scripts --silent --pack-destination $WorkDirectory $gatewaySourceDirectory | Select-Object -Last 1).Trim()
-    if ($LASTEXITCODE -ne 0) { throw "Gateway package build failed" }
+    Push-Location $gatewaySourceDirectory
+    try {
+        $gatewayTarball = (& bun pm pack --ignore-scripts --quiet --destination $WorkDirectory | Select-Object -Last 1).Trim()
+        if ($LASTEXITCODE -ne 0) { throw "Gateway package build failed" }
+    } finally {
+        Pop-Location
+    }
     $reviewSourceDirectory = Join-Path $sourceDirectory "packages/meat-plannotator-review"
-    $reviewTarballName = (& npm pack --ignore-scripts --silent --pack-destination $WorkDirectory $reviewSourceDirectory | Select-Object -Last 1).Trim()
-    if ($LASTEXITCODE -ne 0) { throw "Review package build failed" }
-    & npm install --global --prefix $InstallPrefix `
+    Push-Location $reviewSourceDirectory
+    try {
+        $reviewTarball = (& bun pm pack --ignore-scripts --quiet --destination $WorkDirectory | Select-Object -Last 1).Trim()
+        if ($LASTEXITCODE -ne 0) { throw "Review package build failed" }
+    } finally {
+        Pop-Location
+    }
+    $env:BUN_INSTALL_GLOBAL_DIR = Join-Path $InstallPrefix "bun\install\global"
+    $env:BUN_INSTALL_BIN = $InstallPrefix
+    & bun install --global `
         "opencode-ai@$OpenCodeVersion" `
-        (Join-Path $WorkDirectory $gatewayTarballName) `
-        (Join-Path $WorkDirectory $reviewTarballName)
-    if ($LASTEXITCODE -ne 0) { throw "npm installation failed" }
+        $gatewayTarball `
+        $reviewTarball
+    if ($LASTEXITCODE -ne 0) { throw "Bun installation failed" }
 
     Write-Host "Installing Meat..."
     $env:GOBIN = $InstallPrefix

@@ -11,12 +11,12 @@
     "scripts"
   ],
   "scripts": {
-    "start": "npm run build && node dist/cli.js",
+    "start": "bun run build && node dist/cli.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.json --noEmit false --outDir .test-dist --rootDir . && node --test .test-dist/test/*.test.js",
-    "check": "npm run typecheck && npm test",
-    "prepack": "npm run build"
+    "test": "bun test",
+    "check": "bun run typecheck && bun test",
+    "prepack": "bun run build"
   },
   "engines": {
     "node": ">=20"

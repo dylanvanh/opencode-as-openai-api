@@ -1,0 +1,38 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "opencode-tools",
+      "devDependencies": {
+        "@types/node": "20.19.43",
+        "typescript": "5.9.3",
+      },
+    },
+    "packages/meat-plannotator-review": {
+      "name": "meat-plannotator-review",
+      "version": "0.1.0",
+      "bin": {
+        "meat-plannotator-review": "dist/cli.js",
+      },
+    },
+    "packages/opencode-as-openai-api": {
+      "name": "opencode-as-openai-api",
+      "version": "0.1.0",
+      "bin": {
+        "opencode-as-openai-api": "dist/cli.js",
+      },
+    },
+  },
+  "packages": {
+    "@types/node": ["@types/node@20.19.43", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA=="],
+
+    "meat-plannotator-review": ["meat-plannotator-review@workspace:packages/meat-plannotator-review"],
+
+    "opencode-as-openai-api": ["opencode-as-openai-api@workspace:packages/opencode-as-openai-api"],
+
+    "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
+    "undici-types": ["undici-types@6.21.0", "", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
+  }
+}

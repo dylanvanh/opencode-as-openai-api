@@ -6,6 +6,7 @@ The [Meat + Plannotator review workflow](https://github.com/dylanvanh/opencode-a
 
 ## Requirements
 
+- Bun 1.3.14 or newer
 - Node.js 20 or newer
 - OpenCode 1.18.4 or newer
 - A provider and model already configured in OpenCode
@@ -13,13 +14,13 @@ The [Meat + Plannotator review workflow](https://github.com/dylanvanh/opencode-a
 ## Start
 
 ```sh
-npx opencode-as-openai-api --model anthropic/claude-sonnet-4-20250514
+bunx opencode-as-openai-api --model anthropic/claude-sonnet-4-20250514
 ```
 
 Set a stable API token before startup if another local program needs a fixed value:
 
 ```sh
-OPENCODE_API_TOKEN=choose-a-long-random-value npx opencode-as-openai-api --model provider/model
+OPENCODE_API_TOKEN=choose-a-long-random-value bunx opencode-as-openai-api --model provider/model
 ```
 
 The command prints the local base URL, token, and client configuration. The default base URL is `http://127.0.0.1:8787/v1`.
@@ -51,7 +52,7 @@ Without `--directory`, OpenCode runs in a new empty temporary directory. This st
 ## Test
 
 ```sh
-npm test
+bun test
 ```
 
 Users are responsible for the terms, credentials, limits, and costs of each provider that they configure in OpenCode.

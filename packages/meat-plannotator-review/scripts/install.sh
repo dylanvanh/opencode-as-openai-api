@@ -143,14 +143,16 @@ export PATH="${INSTALL_BIN}:${PATH}"
 
 echo "Installing OpenCode and opencode-as-openai-api..."
 git clone --depth 1 --branch main https://github.com/dylanvanh/opencode-as-openai-api.git "${WORK_DIRECTORY}/source"
-npm --prefix "${WORK_DIRECTORY}/source" ci --ignore-scripts --include=dev
-npm --prefix "${WORK_DIRECTORY}/source" run build --workspaces --if-present
-gateway_tarball="$(npm pack --ignore-scripts --silent --pack-destination "$WORK_DIRECTORY" "${WORK_DIRECTORY}/source/packages/opencode-as-openai-api")"
-review_tarball="$(npm pack --ignore-scripts --silent --pack-destination "$WORK_DIRECTORY" "${WORK_DIRECTORY}/source/packages/meat-plannotator-review")"
-npm install --global --prefix "$INSTALL_PREFIX" \
+bun install --cwd "${WORK_DIRECTORY}/source" --frozen-lockfile --ignore-scripts
+bun run --cwd "${WORK_DIRECTORY}/source" --workspaces --if-present build
+gateway_tarball="$(cd "${WORK_DIRECTORY}/source/packages/opencode-as-openai-api" && bun pm pack --ignore-scripts --quiet --destination "$WORK_DIRECTORY")"
+review_tarball="$(cd "${WORK_DIRECTORY}/source/packages/meat-plannotator-review" && bun pm pack --ignore-scripts --quiet --destination "$WORK_DIRECTORY")"
+export BUN_INSTALL_GLOBAL_DIR="${INSTALL_PREFIX}/share/bun/install/global"
+export BUN_INSTALL_BIN="$INSTALL_BIN"
+bun install --global \
   "opencode-ai@${OPENCODE_VERSION}" \
-  "${WORK_DIRECTORY}/${gateway_tarball}" \
-  "${WORK_DIRECTORY}/${review_tarball}"
+  "$gateway_tarball" \
+  "$review_tarball"
 
 echo "Installing Meat..."
 GOBIN="$INSTALL_BIN" go install "meat.dev/cmd/meat@${MEAT_VERSION}"

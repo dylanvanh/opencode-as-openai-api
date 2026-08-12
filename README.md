@@ -12,5 +12,5 @@ The review package starts the gateway as a private subprocess. The gateway does 
 ## Test
 
 ```sh
-npm run check
+bun run check
 ```
