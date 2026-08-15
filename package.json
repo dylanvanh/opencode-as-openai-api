@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "test": "bun test",
+    "test:e2e": "bun run --workspaces build && bun test ./packages/*/test/e2e.ts",
     "check": "bun run --workspaces --if-present typecheck && bun test"
   },
   "devDependencies": {

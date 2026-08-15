@@ -13,4 +13,5 @@ The review package starts the gateway as a private subprocess. The gateway does 
 
 ```sh
 bun run check
+bun run test:e2e
 ```

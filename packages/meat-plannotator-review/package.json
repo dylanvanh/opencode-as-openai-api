@@ -15,6 +15,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "test": "bun test",
+    "test:e2e": "bun run --filter opencode-as-openai-api build && bun run build && bun test ./test/e2e.ts",
     "check": "bun run typecheck && bun test",
     "prepack": "bun run build"
   },
