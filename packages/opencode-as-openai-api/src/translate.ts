@@ -1,4 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { ApiError } from "./_internal/api-error.js";
+import {
+  normalizeResponseFormat,
+  type NormalizedResponseFormat,
+  type ResponseTextFormat,
+} from "./_internal/response-format.js";
+
+export { ApiError } from "./_internal/api-error.js";
 
 const HTTP_BAD_REQUEST_STATUS = 400;
 const HTTP_NOT_FOUND_STATUS = 404;
@@ -11,6 +19,7 @@ const CHAT_MESSAGE_ROLES = new Set([...MESSAGE_ROLES, "tool"]);
 const TEXT_CONTENT_TYPES = new Set(["input_text", "output_text", "text"]);
 const FUNCTION_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const MODEL_NAME_PATTERN = /^[^/\s]+\/\S+$/;
+const STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 
 type UnknownRecord = Record<string, unknown>;
 export type ToolChoiceMode = "auto" | "none" | "required";
@@ -50,6 +59,7 @@ export interface TranscriptEntry {
 
 export interface NormalizedRequest {
   stream: boolean;
+  responseFormat: NormalizedResponseFormat | null;
   transcript: TranscriptEntry[];
   tools: NormalizedTool[];
   toolChoice: {
@@ -58,7 +68,7 @@ export interface NormalizedRequest {
   };
 }
 
-export interface ResultSchema {
+export interface ResultSchema extends UnknownRecord {
   type: "object";
   oneOf: UnknownRecord[];
 }
@@ -71,7 +81,7 @@ export interface OpenCodeRequestBody {
   variant?: string;
   format?: {
     type: "json_schema";
-    schema: ResultSchema;
+    schema: UnknownRecord;
     retryCount: number;
   };
 }
@@ -79,6 +89,7 @@ export interface OpenCodeRequestBody {
 export interface StructuredOutputPolicy {
   allowText: boolean;
   allowedFunctionNames: readonly string[];
+  responseFormat?: NormalizedResponseFormat | null;
 }
 
 export interface TokenUsage {
@@ -117,28 +128,6 @@ type ChatMessage =
     tool_calls: [{ id: string; type: "function"; function: { name: string; arguments: string } }];
   };
 
-export class ApiError extends Error {
-  readonly status: number;
-  readonly type: string;
-  readonly param: string | null;
-  readonly code: string | null;
-
-  constructor(
-    status: number,
-    message: string,
-    type = "invalid_request_error",
-    param: string | null = null,
-    code: string | null = null,
-  ) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.type = type;
-    this.param = param;
-    this.code = code;
-  }
-}
-
 export function splitModel(model: unknown): ModelIdentifier {
   const slashIndex = typeof model === "string" ? model.indexOf("/") : -1;
   if (typeof model !== "string" || !MODEL_NAME_PATTERN.test(model) || slashIndex < 1) {
@@ -154,6 +143,8 @@ export function normalizeResponsesRequest(body: unknown, lockedModel: string): N
 
   const tools = normalizeTools(requestBody["tools"], false);
   const toolChoice = normalizeToolChoice(requestBody["tool_choice"], tools, false);
+  const textOptions = requestBody["text"];
+  const responseFormat = normalizeResponseFormat(isRecord(textOptions) ? textOptions["format"] : undefined, false);
   const transcript: TranscriptEntry[] = [];
   const instructions = requestBody["instructions"];
   if (instructions != null && typeof instructions !== "string") {
@@ -170,7 +161,7 @@ export function normalizeResponsesRequest(body: unknown, lockedModel: string): N
     throw invalidRequest("input must be text or an array", "input");
   }
 
-  return { stream: normalizeStream(requestBody["stream"]), transcript, tools, toolChoice };
+  return { stream: normalizeStream(requestBody["stream"]), transcript, tools, toolChoice, responseFormat };
 }
 
 export function normalizeChatCompletionsRequest(body: unknown, lockedModel: string): NormalizedRequest {
@@ -184,8 +175,9 @@ export function normalizeChatCompletionsRequest(body: unknown, lockedModel: stri
   }
   const tools = normalizeTools(requestBody["tools"], true);
   const toolChoice = normalizeToolChoice(requestBody["tool_choice"], tools, true);
+  const responseFormat = normalizeResponseFormat(requestBody["response_format"], true);
   const transcript = messages.map(normalizeChatMessage);
-  return { stream: normalizeStream(requestBody["stream"]), transcript, tools, toolChoice };
+  return { stream: normalizeStream(requestBody["stream"]), transcript, tools, toolChoice, responseFormat };
 }
 
 export function createOpenCodeRequest(
@@ -200,7 +192,9 @@ export function createOpenCodeRequest(
   const prompt = [
     "You are an API model. Answer only from the supplied conversation.",
     "The calling client owns all function execution. Never claim that you ran a function.",
-    request.toolChoice.mode === "none" ? "Return text." : "Choose text or one function call as allowed by the output schema.",
+    tools.length > 0 ? "Choose text or one function call as allowed by the output schema." : "Return the final answer.",
+    request.responseFormat ? "The final answer must be a JSON object matching the response schema. Do not use Markdown fences." : "",
+    request.responseFormat?.format.type === "json_schema" ? `Response format: ${JSON.stringify(request.responseFormat.format)}` : "",
     "Conversation JSON:",
     JSON.stringify(request.transcript),
     tools.length > 0 ? `Available function descriptions:\n${JSON.stringify(toolDescriptions)}` : "",
@@ -215,12 +209,22 @@ export function createOpenCodeRequest(
   };
   if (variant) body.variant = variant;
   if (tools.length > 0) {
-    body.format = { type: "json_schema", schema: createResultSchema(tools, request.toolChoice.mode), retryCount: 2 };
+    body.format = {
+      type: "json_schema",
+      schema: createResultSchema(tools, request.toolChoice.mode, request.responseFormat?.schema),
+      retryCount: STRUCTURED_OUTPUT_RETRY_COUNT,
+    };
+  } else if (request.responseFormat) {
+    body.format = { type: "json_schema", schema: request.responseFormat.schema, retryCount: STRUCTURED_OUTPUT_RETRY_COUNT };
   }
   return body;
 }
 
-export function createResultSchema(tools: readonly NormalizedTool[], mode: ToolChoiceMode): ResultSchema {
+export function createResultSchema(
+  tools: readonly NormalizedTool[],
+  mode: ToolChoiceMode,
+  responseSchema?: UnknownRecord,
+): ResultSchema {
   const choices: UnknownRecord[] = tools.map((tool) => ({
     type: "object",
     additionalProperties: false,
@@ -236,10 +240,20 @@ export function createResultSchema(tools: readonly NormalizedTool[], mode: ToolC
       type: "object",
       additionalProperties: false,
       required: ["type", "text"],
-      properties: { type: { const: "text" }, text: { type: "string" } },
+      properties: {
+        type: { const: "text" },
+        // A resource ID keeps local references relative to the caller's schema inside this envelope.
+        text: responseSchema
+          ? { ...responseSchema, $id: responseSchema["$id"] || `urn:uuid:${randomUUID()}` }
+          : { type: "string" },
+      },
     });
   }
-  return { type: "object", oneOf: choices };
+  return {
+    ...(responseSchema?.["$schema"] === undefined ? {} : { $schema: responseSchema["$schema"] }),
+    type: "object",
+    oneOf: choices,
+  };
 }
 
 export function parseOpenCodeResult(value: unknown, structuredOutput: StructuredOutputPolicy | null): OpenCodeResult {
@@ -251,11 +265,19 @@ export function parseOpenCodeResult(value: unknown, structuredOutput: Structured
 
   const output = info["structured"];
   if (!isRecord(output)) throw invalidStructuredOutput();
+  const responseFormat = structuredOutput.responseFormat;
+  if (responseFormat && structuredOutput.allowedFunctionNames.length === 0) {
+    return { type: "text", text: serializeResponseJson(output, responseFormat), usage };
+  }
 
   if (output["type"] === "text") {
-    if (!structuredOutput.allowText || typeof output["text"] !== "string" || !hasOnlyKeys(output, TEXT_OUTPUT_KEYS)) {
+    if (!structuredOutput.allowText || !hasOnlyKeys(output, TEXT_OUTPUT_KEYS)) {
       throw invalidStructuredOutput();
     }
+    if (responseFormat) {
+      return { type: "text", text: serializeResponseJson(output["text"], responseFormat), usage };
+    }
+    if (typeof output["text"] !== "string") throw invalidStructuredOutput();
     return { type: "text", text: output["text"], usage };
   }
 
@@ -283,6 +305,7 @@ export function parseOpenCodeResult(value: unknown, structuredOutput: Structured
 export function createResponsesApiObject(
   result: OpenCodeResult,
   model: string,
+  format: ResponseTextFormat = { type: "text" },
   id = `resp_${randomUUID().replaceAll("-", "")}`,
   createdSeconds = Math.floor(Date.now() / MILLISECONDS_PER_SECOND),
 ) {
@@ -319,7 +342,7 @@ export function createResponsesApiObject(
     reasoning: { effort: null, summary: null },
     store: false,
     temperature: 1,
-    text: { format: { type: "text" } },
+    text: { format },
     tool_choice: "auto",
     tools: [],
     top_p: 1,
@@ -545,7 +568,6 @@ function rejectUnsupportedOptions(body: UnknownRecord, chat: boolean): void {
   if (chat) {
     if (body["n"] != null && body["n"] !== 1) rejectOption("n");
     if (body["logprobs"]) rejectOption("logprobs");
-    if (body["response_format"]) rejectOption("response_format");
     return;
   }
 
@@ -558,8 +580,6 @@ function rejectUnsupportedOptions(body: UnknownRecord, chat: boolean): void {
   const textOptions = body["text"];
   if (textOptions == null) return;
   if (!isRecord(textOptions)) rejectOption("text");
-  const format = textOptions["format"];
-  if (format != null && (!isRecord(format) || format["type"] !== "text")) rejectOption("text");
 }
 
 function rejectOption(field: string): never {
@@ -638,6 +658,11 @@ function stringifyStructuredArguments(value: UnknownRecord): string {
   } catch {
     throw invalidStructuredOutput();
   }
+}
+
+function serializeResponseJson(value: unknown, responseFormat: NormalizedResponseFormat): string {
+  if (!isRecord(value) || !responseFormat.validate(value)) throw invalidStructuredOutput();
+  return stringifyStructuredArguments(value);
 }
 
 function hasOnlyKeys(value: UnknownRecord, allowedKeys: readonly string[]): boolean {

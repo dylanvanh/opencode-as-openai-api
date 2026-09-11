@@ -137,7 +137,7 @@ export function createGateway({
         const result = parseOpenCodeResult(upstream, structuredOutputPolicy(normalized));
         status = HTTP_OK_STATUS;
         if (kind === "responses") {
-          const apiResponse = createResponsesApiObject(result, model);
+          const apiResponse = createResponsesApiObject(result, model, normalized.responseFormat?.format);
           if (normalized.stream) {
             startSse(response);
             streamResponse(response, result, apiResponse);
@@ -254,10 +254,12 @@ function requestBuffer(value: unknown): Buffer {
 }
 
 function structuredOutputPolicy(request: NormalizedRequest): StructuredOutputPolicy | null {
-  if (request.tools.length === 0 || request.toolChoice.mode === "none") return null;
+  const hasActiveTools = request.tools.length > 0 && request.toolChoice.mode !== "none";
+  if (!hasActiveTools && !request.responseFormat) return null;
   return {
     allowText: request.toolChoice.mode !== "required",
-    allowedFunctionNames: request.toolChoice.names,
+    allowedFunctionNames: hasActiveTools ? request.toolChoice.names : [],
+    responseFormat: request.responseFormat,
   };
 }
 

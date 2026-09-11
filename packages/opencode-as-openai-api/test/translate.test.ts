@@ -104,7 +104,7 @@ test("rejects an invalid function name", () => {
   assert.throws(normalizeInvalidTool, /function name must use 1-64 letters/);
 });
 
-test("rejects structured Responses output formats", () => {
+test("rejects a Responses JSON schema format without a name", () => {
   // given
   const requestBody = {
     model: MODEL,
@@ -116,10 +116,10 @@ test("rejects structured Responses output formats", () => {
   const normalizeStructuredResponse = (): unknown => normalizeResponsesRequest(requestBody, MODEL);
 
   // then
-  assert.throws(normalizeStructuredResponse, /text is not supported/);
+  assert.throws(normalizeStructuredResponse, /text.format.name must use 1-64/);
 });
 
-test("rejects structured Chat Completions output formats", () => {
+test("rejects a Chat Completions JSON schema format without its definition", () => {
   // given
   const requestBody = {
     model: MODEL,
@@ -131,7 +131,7 @@ test("rejects structured Chat Completions output formats", () => {
   const normalizeStructuredChat = (): unknown => normalizeChatCompletionsRequest(requestBody, MODEL);
 
   // then
-  assert.throws(normalizeStructuredChat, /response_format is not supported/);
+  assert.throws(normalizeStructuredChat, /response_format.json_schema must be an object/);
 });
 
 for (const parameters of [[], { type: "array" }]) {
