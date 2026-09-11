@@ -31,6 +31,12 @@ const server = createServer(async (request, response) => {
     return sendJson(200, { id: "session-1" });
   }
   if (request.url === "/session/session-1/message" && request.method === "POST") {
+    let requestBody = "";
+    for await (const chunk of request) requestBody += chunk.toString();
+    const body = JSON.parse(requestBody);
+    if (body.format?.schema?.properties?.city?.type === "string") {
+      return sendJson(200, { info: { structured: { city: "Cape Town" } }, parts: [] });
+    }
     return sendJson(200, {
       info: { tokens: { input: 2, output: 3, reasoning: 0 } },
       parts: [{ type: "text", text: "Hello from fake OpenCode" }],

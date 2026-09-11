@@ -16,42 +16,68 @@ const API_TOKEN = "e2e-token";
 const HTTP_OK_STATUS = 200;
 const PROCESS_STOP_TIMEOUT_5_SECONDS_MS = 5_000;
 const CLI_PATH = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+const CITY = "Cape Town";
 
-test("should serve an OpenAI response through the packaged CLI", async () => {
-  // given
-  const commandDirectory = await mkdtemp(join(tmpdir(), "opencode-api-e2e-"));
-  await installNodeCommand(commandDirectory, "opencode", FAKE_OPENCODE_SOURCE);
-  const gatewayProcess = spawn(process.execPath, [CLI_PATH, "--model", MODEL, "--port", "0"], {
-    env: {
-      ...process.env,
-      OPENCODE_API_TOKEN: API_TOKEN,
-      PATH: pathWithCommandDirectory(commandDirectory),
-    },
-    stdio: "pipe",
-  });
-
-  try {
-    const baseUrl = await readGatewayBaseUrl(gatewayProcess);
-
-    // when
-    const response = await fetch(`${baseUrl}/responses`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${API_TOKEN}`,
-        "content-type": "application/json",
+for (const { label, requestBody, expectedText } of [
+  { label: "text", requestBody: { model: MODEL, input: "Say hello" }, expectedText: "Hello from fake OpenCode" },
+  {
+    label: "structured JSON",
+    requestBody: {
+      model: MODEL,
+      input: "Return a city to visit",
+      text: {
+        format: {
+          type: "json_schema",
+          name: "city_response",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: { city: { type: "string" } },
+            required: ["city"],
+            additionalProperties: false,
+          },
+        },
       },
-      body: JSON.stringify({ model: MODEL, input: "Say hello" }),
+    },
+    expectedText: JSON.stringify({ city: CITY }),
+  },
+]) {
+  test(`should serve an OpenAI ${label} response through the packaged CLI`, async () => {
+    // given
+    const commandDirectory = await mkdtemp(join(tmpdir(), "opencode-api-e2e-"));
+    await installNodeCommand(commandDirectory, "opencode", FAKE_OPENCODE_SOURCE);
+    const gatewayProcess = spawn(process.execPath, [CLI_PATH, "--model", MODEL, "--port", "0"], {
+      env: {
+        ...process.env,
+        OPENCODE_API_TOKEN: API_TOKEN,
+        PATH: pathWithCommandDirectory(commandDirectory),
+      },
+      stdio: "pipe",
     });
-    const responseBody: unknown = await response.json();
 
-    // then
-    assert.equal(response.status, HTTP_OK_STATUS);
-    assert.equal(responseText(responseBody), "Hello from fake OpenCode");
-  } finally {
-    await stopProcess(gatewayProcess);
-    await rm(commandDirectory, { recursive: true, force: true });
-  }
-});
+    try {
+      const baseUrl = await readGatewayBaseUrl(gatewayProcess);
+
+      // when
+      const response = await fetch(`${baseUrl}/responses`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${API_TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
+      const responseBody: unknown = await response.json();
+
+      // then
+      assert.equal(response.status, HTTP_OK_STATUS);
+      assert.equal(responseText(responseBody), expectedText);
+    } finally {
+      await stopProcess(gatewayProcess);
+      await rm(commandDirectory, { recursive: true, force: true });
+    }
+  });
+}
 
 function readGatewayBaseUrl(childProcess: ChildProcessWithoutNullStreams): Promise<string> {
   return new Promise((resolveBaseUrl, rejectBaseUrl) => {

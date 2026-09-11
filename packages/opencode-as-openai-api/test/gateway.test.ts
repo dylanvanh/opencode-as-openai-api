@@ -25,6 +25,14 @@ const GENERATED_TOKENS = 2;
 const REASONING_TOKENS = 1;
 const TOTAL_OUTPUT_TOKENS = GENERATED_TOKENS + REASONING_TOKENS;
 const TOOL_IDS = ["bash", "read", "write"];
+const CITY = "Cape Town";
+const CITY_SCHEMA = {
+  type: "object",
+  properties: { city: { type: "string" } },
+  required: ["city"],
+  additionalProperties: false,
+};
+const CITY_FORMAT = { type: "json_schema", name: "city_response", strict: true, schema: CITY_SCHEMA };
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -220,6 +228,136 @@ test("streams Chat Completions as data-only server-sent events", async () => {
   assert.doesNotMatch(body, /event: undefined/);
   assert.match(body, /data: \{"id":"chatcmpl-/);
   assert.match(body, /data: \[DONE\]\n\n/);
+});
+
+for (const chat of [true, false]) {
+  for (const schemaFormat of [true, false]) {
+    for (const stream of [true, false]) {
+      test(`returns validated ${schemaFormat ? "schema" : "JSON object"} output through ${chat ? "Chat Completions" : "Responses"} with stream=${stream}`, async () => {
+        // given
+        const output = { city: CITY };
+        const { url, calls } = await fixture({ info: { structured: output }, parts: [] });
+        const format = schemaFormat ? CITY_FORMAT : { type: "json_object" };
+        const chatFormat = schemaFormat ? { type: "json_schema", json_schema: CITY_FORMAT } : format;
+        const requestBody = chat
+          ? { model: MODEL, messages: [{ role: "user", content: "Return a city as JSON" }], response_format: chatFormat, stream }
+          : { model: MODEL, input: "Return a city as JSON", text: { format }, stream };
+        const endpoint = chat ? "/v1/chat/completions" : "/v1/responses";
+
+        // when
+        const response = await postJson(url, endpoint, requestBody);
+        const body = stream ? await response.text() : await responseJson(response);
+
+        // then
+        assert.equal(response.status, HTTP_OK_STATUS);
+        assert.deepEqual(calls.at(0)?.format?.schema, schemaFormat ? CITY_SCHEMA : { type: "object" });
+        if (typeof body === "string") {
+          const events = body.split("\n").filter((line) => line.startsWith("data: {")).map((line) => JSON.parse(line.slice("data: ".length)));
+          const delta = chat
+            ? events.find((event) => event.choices?.[0]?.delta?.content)?.choices[0].delta.content
+            : events.find((event) => event.type === "response.output_text.delta")?.delta;
+          assert.equal(delta, JSON.stringify(output));
+          return;
+        }
+        assert.equal(structuredResponseText(body, chat), JSON.stringify(output));
+        if (!chat) assert.deepEqual(body["text"], { format });
+      });
+    }
+  }
+}
+
+for (const output of [undefined, null, [], "{}", {}, { city: null }, { city: CITY, extra: true }]) {
+  test(`rejects invalid upstream schema output before streaming: ${JSON.stringify(output)}`, async () => {
+    // given
+    const { url } = await fixture({ info: { structured: output }, parts: [{ type: "text", text: JSON.stringify({ city: CITY }) }] });
+    const requestBody = {
+      model: MODEL,
+      messages: [{ role: "user", content: "Return a city" }],
+      response_format: { type: "json_schema", json_schema: CITY_FORMAT },
+      stream: true,
+    };
+
+    // when
+    const response = await postJson(url, "/v1/chat/completions", requestBody);
+    const body = await responseJson(response);
+
+    // then
+    assert.equal(response.status, HTTP_BAD_GATEWAY_STATUS);
+    assert.match(response.headers.get("content-type") ?? "", /application\/json/);
+    assertErrorCode(body, "upstream_error");
+  });
+}
+
+test("rejects invalid schemas before calling OpenCode", async () => {
+  // given
+  const { url, calls } = await fixture(textResult("Unexpected"));
+  const requestBody = {
+    model: MODEL,
+    messages: [{ role: "user", content: "Return a city" }],
+    response_format: { type: "json_schema", json_schema: { ...CITY_FORMAT, schema: { type: "object", $ref: "#/$defs/missing" } } },
+  };
+
+  // when
+  const response = await postJson(url, "/v1/chat/completions", requestBody);
+  const body = await responseJson(response);
+
+  // then
+  assert.equal(response.status, HTTP_BAD_REQUEST_STATUS);
+  assert.ok(isRecord(body["error"]));
+  assert.equal(body["error"]["param"], "response_format.json_schema.schema");
+  assert.deepEqual(calls, []);
+});
+
+for (const toolChoice of ["auto", "required", "none", { type: "function", function: { name: "weather" } }]) {
+  const expectsToolCall = toolChoice === "required" || typeof toolChoice === "object";
+  test(`supports JSON response formats with tool_choice=${JSON.stringify(toolChoice)}`, async () => {
+    // given
+    const output = expectsToolCall
+      ? { type: "function_call", name: "weather", arguments: { city: CITY } }
+      : toolChoice === "none" ? { city: CITY } : { type: "text", text: { city: CITY } };
+    const { url } = await fixture({ info: { structured: output }, parts: [] });
+    const requestBody = {
+      model: MODEL,
+      messages: [{ role: "user", content: "Return a city" }],
+      response_format: { type: "json_schema", json_schema: CITY_FORMAT },
+      tools: [{ type: "function", function: { name: "weather", parameters: CITY_SCHEMA } }],
+      tool_choice: toolChoice,
+    };
+
+    // when
+    const response = await postJson(url, "/v1/chat/completions", requestBody);
+    const body = await responseJson(response);
+
+    // then
+    assert.equal(response.status, HTTP_OK_STATUS);
+    if (!expectsToolCall) {
+      assert.equal(structuredResponseText(body, true), JSON.stringify({ city: CITY }));
+      return;
+    }
+    const choices = body["choices"];
+    assert.ok(Array.isArray(choices));
+    assert.equal(choices[0].finish_reason, "tool_calls");
+    assert.equal(choices[0].message.tool_calls[0].function.name, "weather");
+  });
+}
+
+test("rejects a JSON answer when a function call is required", async () => {
+  // given
+  const { url } = await fixture({ info: { structured: { type: "text", text: { city: CITY } } }, parts: [] });
+
+  // when
+  const response = await postJson(url, "/v1/responses", {
+    model: MODEL,
+    input: "Return a city",
+    text: { format: CITY_FORMAT },
+    tools: [{ type: "function", name: "weather", parameters: CITY_SCHEMA }],
+    tool_choice: "required",
+  });
+  const body = await responseJson(response);
+
+  // then
+  assert.equal(response.status, HTTP_BAD_GATEWAY_STATUS);
+  assertErrorCode(body, "upstream_error");
 });
 
 test("returns caller-owned function calls through Chat Completions", async () => {
@@ -491,4 +629,22 @@ function parseSseEvents(body: string): SseEvent[] {
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function structuredResponseText(body: UnknownRecord, chat: boolean): unknown {
+  if (chat) {
+    const choices = body["choices"];
+    assert.ok(Array.isArray(choices));
+    assert.ok(isRecord(choices[0]));
+    const message = choices[0]["message"];
+    assert.ok(isRecord(message));
+    return message["content"];
+  }
+  const output = body["output"];
+  assert.ok(Array.isArray(output));
+  assert.ok(isRecord(output[0]));
+  const content = output[0]["content"];
+  assert.ok(Array.isArray(content));
+  assert.ok(isRecord(content[0]));
+  return content[0]["text"];
 }
