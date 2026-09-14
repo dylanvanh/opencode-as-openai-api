@@ -4,6 +4,7 @@ import type { OpenCodeBackendStrategy } from "./opencode-backend-strategy.js";
 import { OpenCodeTransport } from "./opencode-transport.js";
 
 const BACKEND_CLEANUP_TIMEOUT_5_SECONDS_MS = 5_000;
+const STRUCTURED_OUTPUT_TOOL_NAME = "StructuredOutput";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -37,7 +38,11 @@ export class OpenCodeV1Backend implements OpenCodeBackendStrategy {
     const sessionId = sessionIdFrom(session);
     const sessionPath = `/session/${encodeURIComponent(sessionId)}`;
     try {
-      return await this.request(`${sessionPath}/message`, { method: "POST", body: JSON.stringify(body) }, signal);
+      // V1 filters its internal formatter through the same permissions as executable tools.
+      const message = body.format
+        ? { ...body, tools: { ...body.tools, [STRUCTURED_OUTPUT_TOOL_NAME]: true } }
+        : body;
+      return await this.request(`${sessionPath}/message`, { method: "POST", body: JSON.stringify(message) }, signal);
     } finally {
       if (signal.aborted) {
         try {

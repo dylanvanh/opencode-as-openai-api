@@ -84,6 +84,8 @@ Private-process setup uses a separate `OpenCodeServerStrategy` contract in `open
 
 The gateway also supports V1 1.18.4 or newer. It detects the API during startup, so restart the gateway after switching the upstream server to V2. Your OpenAI client URL and gateway token stay the same.
 
+V1 uses its native `StructuredOutput` formatter for JSON output and caller-owned function calls. The V1 strategy allows only that internal formatter for these requests, after the tool-deny rules. It captures the response JSON and does not execute a caller-owned function. Plain-text requests keep all tools disabled.
+
 V2 accepts supported V1 agent configuration. You can retain the earlier `agent` / `prompt` / `permission` configuration during the switch, or use the native V2 example above after migration. V1 cannot read the native V2 example. Keep a V1 copy if you need to return to the older server.
 
 ## 3. Run as a Linux Service

@@ -86,6 +86,43 @@ test("uses upstream authentication and directory for preflight, messages, and cl
   }
 });
 
+for (const { label, outputOptions, allowsFormatter } of [
+  { label: "plain text", outputOptions: {}, allowsFormatter: false },
+  { label: "JSON output", outputOptions: { text: { format: { type: "json_object" } } }, allowsFormatter: true },
+  {
+    label: "a required function call",
+    outputOptions: {
+      tools: [{ type: "function", name: "estimate_food", parameters: { type: "object" } }],
+      tool_choice: "required",
+    },
+    allowsFormatter: true,
+  },
+]) {
+  test(`allows only the native formatter when V1 needs ${label}`, async () => {
+    // given
+    const fixture = await createUpstreamFixture();
+    const backend = createBackend(fixture.url);
+    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_5_SECONDS_MS);
+    try {
+      await backend.ready(UPSTREAM_MODEL, signal);
+      const normalized = normalizeResponsesRequest({ model: UPSTREAM_MODEL, input: "Estimate two eggs", ...outputOptions }, UPSTREAM_MODEL);
+      const request = createOpenCodeRequest(normalized, UPSTREAM_MODEL, null, backend.toolIds);
+
+      // when
+      await backend.run(request, signal);
+
+      // then
+      const EXPECTED_DISABLED_TOOLS = { "*": false, bash: false, read: false, mcp_custom_tool: false };
+      const messageBody = fixture.requests.find(({ path }) => path.endsWith("/message"))?.body;
+      assert.ok(typeof messageBody === "object" && messageBody !== null && "tools" in messageBody);
+      assert.deepEqual(messageBody.tools, { ...EXPECTED_DISABLED_TOOLS, ...(allowsFormatter ? { StructuredOutput: true } : {}) });
+      assert.deepEqual(request.tools, EXPECTED_DISABLED_TOOLS);
+    } finally {
+      await fixture.close();
+    }
+  });
+}
+
 test("reports authentication failure without exposing the password", async () => {
   // given
   const fixture = await createUpstreamFixture();
