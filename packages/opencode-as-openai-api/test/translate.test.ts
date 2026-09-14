@@ -27,6 +27,7 @@ const WEATHER_TOOL: NormalizedTool = {
   name: TOOL_NAME,
   description: "Read the weather",
   parameters: {
+    $id: "urn:weather-arguments",
     type: "object",
     properties: { city: { type: "string" } },
     required: ["city"],
