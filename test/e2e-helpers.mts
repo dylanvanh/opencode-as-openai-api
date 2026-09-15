@@ -22,7 +22,8 @@ const server = createServer(async (request, response) => {
     response.end(JSON.stringify(body));
   };
 
-  if (request.url === "/global/health") return sendJson(200, { healthy: true });
+  if (request.url === "/global/health") return sendJson(200, { healthy: true, version: "1.18.16" });
+  if (request.url === "/agent") return sendJson(200, [{ name: "opencode-as-openai-api", mode: "primary" }]);
   if (request.url === "/experimental/tool/ids") return sendJson(200, ["bash", "read"]);
   if (request.url === "/config/providers") {
     return sendJson(200, { providers: [{ id: "test", models: { model: {} } }] });

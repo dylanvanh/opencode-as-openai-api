@@ -10,6 +10,10 @@ const MAX_PORT = 65_535;
 const BELOW_MIN_PORT = MIN_PORT - 1;
 const ABOVE_MAX_PORT = MAX_PORT + 1;
 const NON_INTEGER_PORT = 1.5;
+const UPSTREAM_URL = "http://127.0.0.1:4096";
+const UPSTREAM_DIRECTORY = "/srv/opencode-api";
+const MAX_UPSTREAM_URL_LENGTH = 2_048;
+const MAX_DIRECTORY_LENGTH = 4_096;
 
 test("uses the public CLI defaults", () => {
   // given
@@ -125,6 +129,87 @@ test("resolves a relative OpenCode directory", () => {
 
   // then
   assert.equal(options.directory, resolve(relativeDirectory));
+});
+
+for (const directory of [UPSTREAM_DIRECTORY, "C:\\OpenCode\\API", "/remote-only/config with spaces/日本語"]) {
+  test(`preserves the upstream directory ${directory} without local resolution`, () => {
+    // given
+    const argumentsList = ["--model", MODEL, "--upstream-url", `${UPSTREAM_URL}/proxy/`, "--directory", directory];
+
+    // when
+    const options = parseGatewayOptions(argumentsList);
+
+    // then
+    assert.equal(options.upstreamUrl, `${UPSTREAM_URL}/proxy`);
+    assert.equal(options.directory, directory);
+  });
+}
+
+test("requires an explicit upstream directory", () => {
+  // given
+  const argumentsList = ["--model", MODEL, "--upstream-url", UPSTREAM_URL];
+
+  // when
+  const parse = (): unknown => parseCliArguments(argumentsList);
+
+  // then
+  assert.throws(parse, /--directory is required with --upstream-url/);
+});
+
+for (const directory of ["relative", "~/api", "", " ", "/config\nother", "/".repeat(MAX_DIRECTORY_LENGTH + 1)]) {
+  test(`rejects an invalid upstream directory of length ${directory.length}`, () => {
+    // given
+    const argumentsList = ["--model", MODEL, "--upstream-url", UPSTREAM_URL, "--directory", directory];
+
+    // when
+    const parse = (): unknown => parseCliArguments(argumentsList);
+
+    // then
+    assert.throws(parse, /--directory/);
+  });
+}
+
+for (const url of [
+  "", "localhost:4096", "file:///tmp/server", "http://user:secret@localhost:4096", `${UPSTREAM_URL}?token=secret`,
+  `${UPSTREAM_URL}#fragment`, "http://localhost:0", "http://localhost:65536", `${UPSTREAM_URL}\n`,
+  `${UPSTREAM_URL}/${"a".repeat(MAX_UPSTREAM_URL_LENGTH)}`,
+]) {
+  test(`rejects an invalid upstream URL of length ${url.length}`, () => {
+    // given
+    const argumentsList = ["--model", MODEL, "--upstream-url", url, "--directory", UPSTREAM_DIRECTORY];
+
+    // when
+    const parse = (): unknown => parseCliArguments(argumentsList);
+
+    // then
+    assert.throws(parse, /upstream-url|URL credentials/);
+  });
+}
+
+test("accepts HTTPS, IPv6, and both upstream port bounds", () => {
+  // given
+  const urls = ["https://api.example.com/opencode", "http://[::1]:1", `http://localhost:${MAX_PORT}`];
+
+  // when
+  const options = urls.map((url) => parseGatewayOptions(["--model", MODEL, "--upstream-url", url, "--directory", UPSTREAM_DIRECTORY]));
+
+  // then
+  assert.deepEqual(options.map((option) => option.upstreamUrl), urls);
+});
+
+test("accepts an upstream URL and directory at their length limits", () => {
+  // given
+  const urlPrefix = `${UPSTREAM_URL}/`;
+  const url = `${urlPrefix}${"a".repeat(MAX_UPSTREAM_URL_LENGTH - urlPrefix.length)}`;
+  const directory = `/${"a".repeat(MAX_DIRECTORY_LENGTH - 1)}`;
+  const argumentsList = ["--model", MODEL, "--upstream-url", url, "--directory", directory];
+
+  // when
+  const options = parseGatewayOptions(argumentsList);
+
+  // then
+  assert.equal(options.upstreamUrl, url);
+  assert.equal(options.directory, directory);
 });
 
 test("requires provider/model syntax", () => {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ApiError } from "./_internal/api-error.js";
+import { GATEWAY_AGENT_NAME } from "./_internal/opencode-configuration.js";
 import {
   normalizeResponseFormat,
   type NormalizedResponseFormat,
@@ -75,7 +76,7 @@ export interface ResultSchema extends UnknownRecord {
 
 export interface OpenCodeRequestBody {
   model: ModelIdentifier;
-  agent: "opencode-as-openai-api";
+  agent: typeof GATEWAY_AGENT_NAME;
   parts: [{ type: "text"; text: string }];
   tools: Record<string, false>;
   variant?: string;
@@ -203,7 +204,7 @@ export function createOpenCodeRequest(
 
   const body: OpenCodeRequestBody = {
     model: splitModel(model),
-    agent: "opencode-as-openai-api",
+    agent: GATEWAY_AGENT_NAME,
     parts: [{ type: "text", text: prompt }],
     tools: disabledTools,
   };
@@ -232,7 +233,7 @@ export function createResultSchema(
     properties: {
       type: { const: "function_call" },
       name: { const: tool.name },
-      arguments: tool.parameters,
+      arguments: schemaResource(tool.parameters),
     },
   }));
   if (mode !== "required") {
@@ -242,9 +243,8 @@ export function createResultSchema(
       required: ["type", "text"],
       properties: {
         type: { const: "text" },
-        // A resource ID keeps local references relative to the caller's schema inside this envelope.
         text: responseSchema
-          ? { ...responseSchema, $id: responseSchema["$id"] || `urn:uuid:${randomUUID()}` }
+          ? schemaResource(responseSchema)
           : { type: "string" },
       },
     });
@@ -610,6 +610,11 @@ function stringValue(value: unknown, parameter: string): string {
 function upstreamResponseObject(value: unknown): UnknownRecord {
   if (isRecord(value)) return value;
   throw invalidUpstream("OpenCode returned an invalid response");
+}
+
+function schemaResource(schema: UnknownRecord): UnknownRecord {
+  // A resource ID keeps local references relative to the caller's schema inside an envelope.
+  return { ...schema, $id: schema["$id"] || `urn:uuid:${randomUUID()}` };
 }
 
 function responseInfo(response: UnknownRecord): UnknownRecord {

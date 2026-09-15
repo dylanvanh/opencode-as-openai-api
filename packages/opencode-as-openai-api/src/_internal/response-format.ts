@@ -69,7 +69,7 @@ export function normalizeResponseFormat(value: unknown, chat: boolean): Normaliz
   };
 }
 
-function compileSchema(schema: UnknownRecord, parameter: string): ValidateFunction {
+export function compileSchema(schema: UnknownRecord, parameter: string): ValidateFunction {
   validateSchemaSize(schema, parameter);
   const schemaUri = schema["$schema"];
   const dialect = typeof schemaUri === "string" ? schemaUri.replace(/#$/, "") : schemaUri;
