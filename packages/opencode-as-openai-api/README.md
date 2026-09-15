@@ -2,8 +2,6 @@
 
 `opencode-as-openai-api` exposes any configured OpenCode model through an OpenAI-compatible HTTP API. It supports text, structured JSON output, and caller-owned function tools through both Responses and Chat Completions.
 
-The [Meat + Plannotator review workflow](https://github.com/dylanvanh/opencode-as-openai-api/tree/main/packages/meat-plannotator-review) is a separate package. It uses this gateway as a runtime dependency.
-
 ## Requirements
 
 - Bun 1.3.14 or newer
